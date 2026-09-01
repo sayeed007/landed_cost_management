@@ -352,7 +352,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       try {
         const results = search
           .create({
-            type: search.Type.ITEM,
+            type: 'item',
             filters: [['isinactive', 'is', 'F'], 'AND', attempts[index]],
             columns: ['internalid', 'itemid', 'displayname'],
           })
@@ -377,7 +377,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       title: 'LCM matching bill item was not found',
       details: `No active item was found with exact name "${itemName}".`,
     });
-    return { id: '', text: '' };
+    return { id: '', text: itemName };
   }
 
   function getVendorDefaults(vendorId) {

@@ -12,6 +12,21 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   const { FIELDS, SUBLISTS, SCRIPTS } = config;
   let syncing = false;
 
+  function pageInit() {
+    if (syncing) return;
+    syncing = true;
+    try {
+      syncCostProfileDefaults(currentRecord.get(), '');
+    } catch (error) {
+      log.audit({
+        title: 'LCM cost profile page init sync failed',
+        details: error.message || error,
+      });
+    } finally {
+      syncing = false;
+    }
+  }
+
   function normalizeIds(value) {
     if (!value) return [];
     if (Array.isArray(value)) return value.map(String).filter(Boolean);
@@ -141,17 +156,25 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   }
 
   function getLandedCostValue(rec, sublistId, fieldId) {
-    if (sublistId) {
-      return rec.getCurrentSublistValue({ sublistId, fieldId });
+    try {
+      if (sublistId) {
+        return rec.getCurrentSublistValue({ sublistId, fieldId });
+      }
+      return rec.getValue({ fieldId });
+    } catch (error) {
+      return '';
     }
-    return rec.getValue({ fieldId });
   }
 
   function getLandedCostText(rec, sublistId, fieldId) {
-    if (sublistId) {
-      return rec.getCurrentSublistText({ sublistId, fieldId });
+    try {
+      if (sublistId) {
+        return rec.getCurrentSublistText({ sublistId, fieldId });
+      }
+      return rec.getText({ fieldId });
+    } catch (error) {
+      return '';
     }
-    return rec.getText({ fieldId });
   }
 
   function fetchVendorBillDefaults(vendorId) {
@@ -396,5 +419,5 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     }
   }
 
-  return { fieldChanged, openLcmAccountingPreview, selectAllLcmTrackItems };
+  return { pageInit, fieldChanged, openLcmAccountingPreview, selectAllLcmTrackItems };
 });
