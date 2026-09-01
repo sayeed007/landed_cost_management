@@ -546,12 +546,20 @@ ${defaults.reason || ''}`
             ignoreFieldChange: true,
           });
         }
-        return true;
+        if (fieldValueMatches(readFieldValue(rec, sublistId, fieldId), value)) return true;
+        log.audit({
+          title: 'LCM default value set did not stick',
+          details: `${fieldId}: attempted ${value}, read back ${readFieldValue(rec, sublistId, fieldId) || '(blank)'}`,
+        });
       } catch (valueError) {
         log.audit({
           title: 'LCM default value set failed',
           details: `${fieldId}: ${valueError.message || valueError}`,
         });
+      }
+
+      if (sublistId && setLegacyCurrentLineValue(sublistId, fieldId, value)) {
+        if (fieldValueMatches(readFieldValue(rec, sublistId, fieldId), value)) return true;
       }
     }
 
@@ -572,16 +580,78 @@ ${defaults.reason || ''}`
             ignoreFieldChange: true,
           });
         }
-        return true;
+        if (fieldTextMatches(readFieldText(rec, sublistId, fieldId), text) || hasAnyValue(readFieldValue(rec, sublistId, fieldId))) {
+          return true;
+        }
+        log.audit({
+          title: 'LCM default text set did not stick',
+          details: `${fieldId}: attempted "${text}", read back "${readFieldText(rec, sublistId, fieldId) || ''}"`,
+        });
       } catch (textError) {
         log.audit({
           title: 'LCM default text set failed',
           details: `${fieldId}: ${textError.message || textError}`,
         });
       }
+
+      if (sublistId && setLegacyCurrentLineText(sublistId, fieldId, text)) {
+        if (fieldTextMatches(readFieldText(rec, sublistId, fieldId), text) || hasAnyValue(readFieldValue(rec, sublistId, fieldId))) {
+          return true;
+        }
+      }
     }
 
     return false;
+  }
+
+  function readFieldValue(rec, sublistId, fieldId) {
+    return sublistId ? getLandedCostValue(rec, sublistId, fieldId) : safeGetValue(rec, fieldId);
+  }
+
+  function readFieldText(rec, sublistId, fieldId) {
+    return getLandedCostText(rec, sublistId, fieldId);
+  }
+
+  function fieldValueMatches(actual, expected) {
+    if (Array.isArray(actual)) return actual.map(String).indexOf(String(expected)) >= 0;
+    return String(actual || '') === String(expected || '');
+  }
+
+  function fieldTextMatches(actual, expected) {
+    return String(actual || '').trim() === String(expected || '').trim();
+  }
+
+  function hasAnyValue(value) {
+    if (Array.isArray(value)) return value.length > 0;
+    return value !== null && value !== undefined && value !== '';
+  }
+
+  function setLegacyCurrentLineValue(sublistId, fieldId, value) {
+    try {
+      if (typeof nlapiSetCurrentLineItemValue !== 'function') return false;
+      nlapiSetCurrentLineItemValue(sublistId, fieldId, String(value), false, true);
+      return true;
+    } catch (error) {
+      log.audit({
+        title: 'LCM legacy default value set failed',
+        details: `${fieldId}: ${error.message || error}`,
+      });
+      return false;
+    }
+  }
+
+  function setLegacyCurrentLineText(sublistId, fieldId, text) {
+    try {
+      if (typeof nlapiSetCurrentLineItemText !== 'function') return false;
+      nlapiSetCurrentLineItemText(sublistId, fieldId, text, false, true);
+      return true;
+    } catch (error) {
+      log.audit({
+        title: 'LCM legacy default text set failed',
+        details: `${fieldId}: ${error.message || error}`,
+      });
+      return false;
+    }
   }
 
   function setTextIfPresent(rec, sublistId, fieldId, text) {
