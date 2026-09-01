@@ -2,29 +2,77 @@
  * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
-define(['N/currentRecord', 'N/https', 'N/log', 'N/search', 'N/url', './lcm_po_selection_config'], (
+define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_config'], (
   currentRecord,
   https,
   log,
-  search,
   url,
   config
 ) => {
-  const { FIELDS, SUBLISTS, SCRIPTS } = config;
+  const { FIELDS, SUBLISTS, SCRIPTS, DEBUG } = config;
   let syncing = false;
 
   function pageInit() {
     if (syncing) return;
     syncing = true;
     try {
+      announceClientLoad(currentRecord.get());
       syncCostProfileDefaults(currentRecord.get(), '');
     } catch (error) {
-      log.audit({
+      log.error({
         title: 'LCM cost profile page init sync failed',
         details: error.message || error,
       });
     } finally {
       syncing = false;
+    }
+  }
+
+  // N/log in a client script writes to the BROWSER CONSOLE, not the NetSuite execution log.
+  // Open devtools to read these; the execution log only carries the server-side entries.
+  function announceClientLoad(rec) {
+    if (!DEBUG.announceClientLoad) return;
+    const reachable = listReachableFields(rec);
+    log.audit({
+      title: 'LCM client script loaded',
+      details:
+        `Record type: ${safeRecordType(rec)}. ` +
+        `Looking for LC Cost Profile on "${FIELDS.lcmLandedCosts.costProfile}" and ` +
+        `LC Cost Item on "${FIELDS.lcmLandedCosts.billItem}". ` +
+        `Profile field reachable: ${reachable.profile}. Item field reachable: ${reachable.item}.`,
+    });
+    if (!reachable.profile) {
+      window.alert(
+        'LCM client script loaded, but this form has no field "' +
+          FIELDS.lcmLandedCosts.costProfile +
+          '". LC Cost Item cannot be auto-filled until the field id in lcm_po_selection_config.js ' +
+          'matches the form. See the LCM Landed Cost form field inventory entry in the script ' +
+          'execution log for the real field ids.'
+      );
+    }
+  }
+
+  function listReachableFields(rec) {
+    return {
+      profile: fieldExists(rec, FIELDS.lcmLandedCosts.costProfile),
+      item: fieldExists(rec, FIELDS.lcmLandedCosts.billItem),
+    };
+  }
+
+  function fieldExists(rec, fieldId) {
+    try {
+      const fieldIds = rec.getFields() || [];
+      return fieldIds.indexOf(fieldId) >= 0;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function safeRecordType(rec) {
+    try {
+      return rec.type || '(unknown)';
+    } catch (error) {
+      return '(unknown)';
     }
   }
 
@@ -95,21 +143,56 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/search', 'N/url', './lcm_po_se
     const costCategoryId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
     const costCategoryText = getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
 
-    if (!costCategoryId && !costCategoryText) return;
+    if (!costCategoryId && !costCategoryText) {
+      // Reaching here on a fieldChanged for the profile field means the field id is wrong for
+      // this form. Staying silent here is what made the original failure invisible.
+      log.audit({
+        title: 'LCM LC Cost Profile sourcing skipped',
+        details: `No value readable from "${FIELDS.lcmLandedCosts.costProfile}" (sublist "${sublistId ||
+          'body'}"). Either nothing is selected, or that field id does not exist on this form.`,
+      });
+      return;
+    }
 
     try {
-      const defaults = getCostProfileDefaults(costCategoryId, costCategoryText);
+      const defaults = fetchCostProfileDefaults(costCategoryId, costCategoryText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
       const itemSet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
-      if ((defaults.costCategoryText || costCategoryText) && !itemSet) {
-        window.alert(`No active LC Cost Item was found with the same name as "${defaults.costCategoryText || costCategoryText}".`);
+
+      log.audit({
+        title: 'LCM LC Cost Profile sourcing',
+        details:
+          `Cost Profile internal id: ${costCategoryId || '(none)'}. ` +
+          `Cost Profile text: "${costCategoryText || defaults.costCategoryText}". ` +
+          `Attempted item name: "${defaults.attemptedItemName || ''}". ` +
+          `Resolved item: ${defaults.billItem || '(none)'}. Written to form: ${itemSet}. ` +
+          `Reason: ${defaults.reason || '(none)'}`,
+      });
+
+      if (!itemSet) {
+        window.alert(
+          defaults.billItem
+            ? `LC Cost Item ${defaults.billItem} ("${defaults.billItemText}") was found, but field "${
+                FIELDS.lcmLandedCosts.billItem
+              }" would not accept it on this form. It will still be set on save.`
+            : `No active item is named exactly "${defaults.costCategoryText || costCategoryText}", ` +
+              `so LC Cost Item was left empty.
+
+${defaults.reason || ''}`
+        );
       }
     } catch (error) {
-      log.audit({
+      log.error({
         title: 'LCM cost profile defaults were not sourced',
         details: error.message || error,
       });
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, costCategoryId, costCategoryText);
+      window.alert(
+        `LC Cost Item could not be looked up: ${error.message || error}
+
+` +
+          'It will still be set when the record is saved.'
+      );
     }
     copyHeaderDefaultsToLandedCostLine(rec, sublistId);
     syncAllocationMethodDefault(rec, contextSublistId);
@@ -193,55 +276,22 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/search', 'N/url', './lcm_po_se
     return payload.defaults || {};
   }
 
-  function getCostProfileDefaults(costCategoryId, costCategoryText) {
-    const categoryText = String(costCategoryText || '').trim();
-    const billItem = findActiveItemByExactName(categoryText);
-    return {
-      costCategory: costCategoryId || '',
-      costCategoryText: categoryText,
-      billItem: billItem.id,
-      billItemText: billItem.text || categoryText,
-    };
-  }
-
-  function findActiveItemByExactName(itemName) {
-    if (!itemName) return { id: '', text: '' };
-    const attempts = [
-      ['itemid', 'is', itemName],
-      ['name', 'is', itemName],
-      ['displayname', 'is', itemName],
-    ];
-
-    for (let index = 0; index < attempts.length; index += 1) {
-      try {
-        const results = search
-          .create({
-            type: 'item',
-            filters: [['isinactive', 'is', 'F'], 'AND', attempts[index]],
-            columns: ['internalid', 'itemid', 'displayname'],
-          })
-          .run()
-          .getRange({ start: 0, end: 1 });
-
-        if (results && results.length) {
-          const result = results[0];
-          return {
-            id: String(result.getValue({ name: 'internalid' }) || ''),
-            text:
-              String(result.getValue({ name: 'itemid' }) || '') ||
-              String(result.getValue({ name: 'displayname' }) || '') ||
-              itemName,
-          };
-        }
-      } catch (error) {
-        log.audit({
-          title: 'LCM item lookup attempt failed',
-          details: `${attempts[index][0]}=${itemName}: ${error.message || error}`,
-        });
-      }
-    }
-
-    return { id: '', text: itemName };
+  // Resolved server side through the Suitelet rather than with a client-side N/search, so the
+  // client and the beforeSubmit fallback always agree on which item a profile maps to.
+  function fetchCostProfileDefaults(costCategoryId, costCategoryText) {
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        action: 'costProfileDefaults',
+        costCategoryId: costCategoryId || '',
+        costCategoryText: costCategoryText || '',
+      },
+    });
+    const response = https.get({ url: suiteletUrl });
+    const payload = JSON.parse(response.body || '{}');
+    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Profile defaults.');
+    return payload.defaults || {};
   }
 
   function fetchAllocationMethodDefault(costCategoryId) {

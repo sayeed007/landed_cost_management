@@ -167,3 +167,35 @@ Allocation behavior:
 - If the allocation method text contains amount/value/rate, cost is allocated by PO value.
 - Otherwise, cost is allocated equally across checked item rows.
 - Exchange rate defaults to `1` when blank.
+
+## 10. LC Cost Profile Auto-Sourcing
+
+Selecting `LC Cost Profile` (`custrecord_lcm_lcm_cost_profile`, native Landed Cost Category list `-155`) sources the hidden references behind it.
+
+- `LC Cost Item` (`custrecord_lcm_lcm_bill_item`, Item `-10`) is matched to an **active** item whose Name/Number (`itemid`) or Display Name (`displayname`) equals the profile text exactly. Example: profile `LC Advanced Income Tax` resolves to item `1933`.
+- `Cost Category` (`custrecord_lcm_lcm_cost_category`) stores the selected category so generated Vendor Bills can tag the item line.
+- Item search filters on `itemid` then `displayname`. `name` is **not** a searchable field on an item search and raised `invalid field: name` on every lookup; it has been removed.
+- A subitem's `itemid` includes its parent (`Parent : Child`), so a subitem will not match on Name/Number. Give it a Display Name equal to the profile text, or use a top-level item.
+- `normalizeValue` was called six times in `lcm_accounting_lib.js` without ever being defined, so every `getCostProfileDefaults` call raised `ReferenceError` at runtime. It is now defined.
+
+### Where sourcing runs
+
+| Path | Script | Runs when | Guarantee |
+| --- | --- | --- | --- |
+| Immediate | `lcm_po_selection_client.js` `fieldChanged`/`pageInit` | User changes LC Cost Profile on the form | Best effort. Depends on the client script loading and the field ids matching the rendered form. |
+| Fallback | `lcm_landed_cost_lock_user_event.js` `beforeSubmit` | Create, edit, **and inline edit (XEDIT)** | Guaranteed. Runs regardless of form, field visibility, or whether the client script loaded. |
+
+Inline edit was previously skipped entirely, so rows saved through inline edit or CSV import never received the hidden references. `XEDIT` now runs `sourceCostProfileRefs` only; the full vendor/parent sourcing stays off that path because an inline edit submits only the touched fields.
+
+The client resolves the item through the `costProfileDefaults` Suitelet action rather than its own `N/search`, so the immediate path and the save-time fallback cannot disagree.
+
+### Diagnostics
+
+`DEBUG` in `lcm_po_selection_config.js` controls two verbose aids. Turn them off once field ids are confirmed.
+
+- `logFormFields` - `beforeLoad` writes `LCM Landed Cost form field inventory` to the execution log for `customscript_lcm_landed_cost_lock_ue`, listing every `custrecord` field on the **rendered** form with its id, label, and type, split into ON FORM / NOT ON FORM. A custom entry form keeps its own layout and overrides the `displaytype` held in SDF, so the object XML cannot be trusted to describe the live form. This is how to find the real field id behind a label.
+- `announceClientLoad` - `pageInit` logs `LCM client script loaded` and alerts if the configured LC Cost Profile field id is absent from the form.
+
+Every failure path now reports the selected category internal ID, the selected category text, the attempted item name, and the reason. Failures log at `error` level, successes at `audit`.
+
+`N/log` in a **client** script writes to the browser console, not the NetSuite execution log. Client-side entries will never appear under the script deployment; open browser devtools for those.

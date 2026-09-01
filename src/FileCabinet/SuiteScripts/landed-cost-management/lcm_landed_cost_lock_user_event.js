@@ -2,9 +2,10 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_accounting_lib'], (
+define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config', './lcm_accounting_lib'], (
   error,
   format,
+  log,
   record,
   config,
   accounting
@@ -14,6 +15,54 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
   function beforeLoad(context) {
     if (!context.form) return;
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
+    logFormFieldInventory(context);
+  }
+
+  // Answers "which field id is the visible LC Cost Item on the form actually being rendered?".
+  // A custom entry form keeps its own layout and overrides the displaytype held in SDF, so the
+  // object XML cannot be trusted to describe the live form. This reads the rendered form itself.
+  // Runs server side, so it lands in the script execution log for customscript_lcm_landed_cost_lock_ue.
+  function logFormFieldInventory(context) {
+    if (!config.DEBUG.logFormFields) return;
+
+    let fieldIds = [];
+    try {
+      fieldIds = context.newRecord.getFields() || [];
+    } catch (fieldsError) {
+      log.error({ title: 'LCM form field inventory unavailable', details: fieldsError.message || fieldsError });
+      return;
+    }
+
+    const onForm = [];
+    const notOnForm = [];
+    fieldIds.forEach((fieldId) => {
+      if (String(fieldId).indexOf('custrecord') !== 0) return;
+      try {
+        const field = context.form.getField({ id: fieldId });
+        onForm.push(`${fieldId} = "${(field && field.label) || ''}" [${(field && field.type) || '?'}]`);
+      } catch (getFieldError) {
+        notOnForm.push(fieldId);
+      }
+    });
+
+    log.audit({
+      title: 'LCM Landed Cost form field inventory',
+      details:
+        `Form: ${getFormIdentity(context)}. ` +
+        `Configured LC Cost Profile: ${FIELDS.lcmLandedCosts.costProfile}. ` +
+        `Configured LC Cost Item: ${FIELDS.lcmLandedCosts.billItem}. ` +
+        `ON FORM -> ${onForm.join(' | ') || 'none'}. ` +
+        `NOT ON FORM -> ${notOnForm.join(', ') || 'none'}`,
+    });
+  }
+
+  function getFormIdentity(context) {
+    try {
+      const customForm = context.newRecord.getValue({ fieldId: 'customform' });
+      return `${context.type} customform=${customForm || '(default)'}`;
+    } catch (error) {
+      return String(context.type || 'unknown');
+    }
   }
 
   function beforeSubmit(context) {
@@ -30,7 +79,11 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
     const oldTranId = context.oldRecord.getValue({ fieldId: f.createdTransactionId });
     const wasCreated = normalize(oldStatus) === normalize(accounting.STATUS.created) || Boolean(oldTranId);
     if (!wasCreated) {
-      if (context.type !== context.UserEventType.XEDIT) {
+      if (context.type === context.UserEventType.XEDIT) {
+        // An inline edit submits only the touched fields, so the full vendor/parent sourcing has
+        // nothing to read. The cost profile refs are self-contained and safe to derive here.
+        sourceCostProfileRefs(context.newRecord);
+      } else {
         sourceVendorDefaults(context.newRecord);
       }
       return;
@@ -92,16 +145,50 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
     }
   }
 
+  // Server-side sourcing is the guaranteed path: it runs no matter which form was used, whether
+  // the fields are hidden, and whether the client script loaded at all. The client script only
+  // mirrors this so the user sees the value before saving.
   function sourceCostProfileRefs(rec) {
     const f = FIELDS.lcmLandedCosts;
-    const defaults = accounting.getCostProfileDefaults(
-      rec.getValue({ fieldId: f.costProfile }),
-      getTextIfPresent(rec, f.costProfile)
-    );
+    const profileId = rec.getValue({ fieldId: f.costProfile });
+    const profileText = getTextIfPresent(rec, f.costProfile);
+
+    if (!profileId && !profileText) {
+      log.audit({
+        title: 'LCM LC Cost Profile sourcing skipped',
+        details: `No value on ${f.costProfile}. Nothing to resolve an LC Cost Item from.`,
+      });
+      return;
+    }
+
+    const defaults = accounting.getCostProfileDefaults(profileId, profileText);
     if (!defaults.costCategory && !defaults.costCategoryText) return;
 
-    setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
-    setValueOrText(rec, f.billItem, defaults.billItem, defaults.billItemText);
+    const categorySet = setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
+    const itemSet = setValueOrText(rec, f.billItem, defaults.billItem, defaults.billItemText);
+
+    if (!itemSet) {
+      log.error({
+        title: 'LCM LC Cost Item was not written to the record',
+        details:
+          `Cost Profile internal id: ${profileId || '(none)'}. Cost Profile text: "${profileText ||
+            defaults.costCategoryText}". Attempted item name: "${defaults.attemptedItemName || ''}". ` +
+          `Resolved item: ${defaults.billItem || '(none)'}. Target field: ${f.billItem}. ` +
+          `Reason: ${
+            defaults.billItem
+              ? `field ${f.billItem} rejected the write or does not exist on this record. Check the LCM Landed Cost form field inventory log for the real field id.`
+              : defaults.reason || 'no matching item'
+          }`,
+      });
+      return;
+    }
+
+    log.audit({
+      title: 'LCM LC Cost Item sourced',
+      details: `${f.costProfile}=${profileId} ("${defaults.costCategoryText}") -> ${f.billItem}=${
+        defaults.billItem
+      } ("${defaults.billItemText}"). Cost Category written: ${categorySet}.`,
+    });
   }
 
   function sourceAllocationMethodDefault(rec) {
@@ -168,18 +255,20 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
     if (value !== null && value !== undefined && value !== '') {
       try {
         rec.setValue({ fieldId, value });
-        return;
+        return true;
       } catch (valueError) {
         // Fall through to text sourcing where available.
       }
     }
 
-    if (!text) return;
+    if (!text) return false;
 
     try {
       rec.setText({ fieldId, text });
+      return true;
     } catch (textError) {
       // Keep save flow moving if an account-specific default cannot be applied.
+      return false;
     }
   }
 

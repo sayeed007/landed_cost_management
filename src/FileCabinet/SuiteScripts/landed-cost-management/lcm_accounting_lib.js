@@ -25,6 +25,10 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return Math.round((Number(value) || 0) * 100) / 100;
   }
 
+  function normalizeValue(value) {
+    return value === null || value === undefined ? '' : String(value);
+  }
+
   function normalizeChoice(value) {
     return String(value || '')
       .toLowerCase()
@@ -307,13 +311,29 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (costProfileDefaultsCache[cacheKey]) return costProfileDefaultsCache[cacheKey];
 
     const billItem = findActiveItemByExactName(categoryText);
-    costProfileDefaultsCache[cacheKey] = {
+    const defaults = {
       costCategory: categoryId,
       costCategoryText: categoryText,
       billItem: billItem.id,
       billItemText: billItem.text,
+      attemptedItemName: categoryText,
+      matched: Boolean(billItem.id),
+      reason: billItem.reason || '',
     };
-    return costProfileDefaultsCache[cacheKey];
+
+    log[defaults.matched ? 'audit' : 'error']({
+      title: `LCM LC Cost Profile ${defaults.matched ? 'resolved' : 'did NOT resolve'} an LC Cost Item`,
+      details:
+        `Cost Profile internal id: ${categoryId || '(none)'}. ` +
+        `Cost Profile text: "${categoryText || '(none)'}". ` +
+        `Attempted item name: "${defaults.attemptedItemName || '(none)'}". ` +
+        `Result: ${
+          defaults.matched ? `item ${defaults.billItem} ("${defaults.billItemText}")` : 'no item set'
+        }. Reason: ${defaults.reason || '(none)'}`,
+    });
+
+    costProfileDefaultsCache[cacheKey] = defaults;
+    return defaults;
   }
 
   function lookupCostCategoryName(costCategoryId) {
@@ -341,23 +361,28 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function findActiveItemByExactName(itemName) {
-    if (!itemName) return { id: '', text: '' };
-    const attempts = [
-      ['itemid', 'is', itemName],
-      ['name', 'is', itemName],
-      ['displayname', 'is', itemName],
-    ];
+    const name = normalizeValue(itemName).trim();
+    if (!name) {
+      return { id: '', text: '', reason: 'LC Cost Profile carried no text to match an item name against.' };
+    }
+
+    // `name` is not a searchable field on an item search and throws. `itemid` is Name/Number,
+    // `displayname` is Display Name; those are the two an exact match can run against.
+    const attempts = [['itemid', 'is', name], ['displayname', 'is', name]];
+    const tried = [];
 
     for (let index = 0; index < attempts.length; index += 1) {
+      const attempt = attempts[index];
       try {
         const results = search
           .create({
             type: 'item',
-            filters: [['isinactive', 'is', 'F'], 'AND', attempts[index]],
+            filters: [['isinactive', 'is', 'F'], 'AND', attempt],
             columns: ['internalid', 'itemid', 'displayname'],
           })
           .run()
-          .getRange({ start: 0, end: 1 });
+          .getRange({ start: 0, end: 2 });
+
         if (results && results.length) {
           const result = results[0];
           return {
@@ -365,19 +390,24 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
             text:
               normalizeValue(result.getValue({ name: 'itemid' })) ||
               normalizeValue(result.getValue({ name: 'displayname' })) ||
-              itemName,
+              name,
+            reason:
+              results.length > 1
+                ? `Matched on ${attempt[0]}, but more than one active item carries this name. Took the first.`
+                : `Matched on ${attempt[0]}.`,
           };
         }
-      } catch (error) {
-        // Try the next item-name field; accounts differ on what is searchable.
+        tried.push(`${attempt[0]} is "${name}" -> 0 rows`);
+      } catch (searchError) {
+        tried.push(`${attempt[0]} is "${name}" -> ${searchError.message || searchError}`);
       }
     }
 
-    log.audit({
-      title: 'LCM matching bill item was not found',
-      details: `No active item was found with exact name "${itemName}".`,
-    });
-    return { id: '', text: itemName };
+    const reason =
+      `No active item matched. Tried ${tried.join('; ')}. Confirm the item is active and its ` +
+      `Name/Number equals the LC Cost Profile text exactly. A subitem's Name/Number includes its ` +
+      `parent ("Parent : ${name}"), so a subitem will not match on itemid.`;
+    return { id: '', text: name, reason };
   }
 
   function getVendorDefaults(vendorId) {

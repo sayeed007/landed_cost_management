@@ -85,6 +85,16 @@ define([], () => {
     },
   };
 
+  // Diagnostics for the LC Cost Profile -> LC Cost Item sourcing. Turn these off once the
+  // field ids are confirmed against the live form; they are verbose by design.
+  const DEBUG = {
+    // Server side: logs every custrecord field on the rendered Landed Cost form with its id and
+    // label, so the real field id behind a label can be read off the execution log.
+    logFormFields: true,
+    // Client side: announces that the client script loaded, and alerts when sourcing cannot run.
+    announceClientLoad: true,
+  };
+
   const TRANSACTION_FIELDS = {
     vendorBill: {
       billType: 'custbody12',
@@ -98,5 +108,5 @@ define([], () => {
     journalCreditAccount: '',
   };
 
-  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS };
+  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEBUG };
 });
