@@ -231,20 +231,26 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
           `target field=${FIELDS.lcmLandedCosts.billItem}\n` +
           `current target value=${writtenItem || '(blank)'}\n` +
           `current target text="${writtenItemText || ''}"\n` +
-          `expected item=${defaults.billItem || '(blank)'} "${defaults.billItemText || ''}"`
+          `expected item=${defaults.billItem || '(blank)'} "${defaults.billItemText || ''}"\n` +
+          `server save fallback=${defaults.billItem && !itemSet ? 'yes' : 'not needed'}`
       );
 
       if (!itemSet) {
-        window.alert(
-          defaults.billItem
-            ? `LC Cost Item ${defaults.billItem} ("${defaults.billItemText}") was found, but field "${
-                FIELDS.lcmLandedCosts.billItem
-              }" would not accept it on this form. It will still be set on save.`
-            : `No active item is named exactly "${defaults.costCategoryText || costCategoryText}", ` +
+        if (defaults.billItem) {
+          log.audit({
+            title: 'LCM LC Cost Item deferred to save',
+            details:
+              `Item ${defaults.billItem} ("${defaults.billItemText}") was found, but field ${FIELDS.lcmLandedCosts.billItem} ` +
+              'did not accept a browser-side current-line write on this form. The child record User Event will set it on save.',
+          });
+        } else {
+          window.alert(
+            `No active item is named exactly "${defaults.costCategoryText || costCategoryText}", ` +
               `so LC Cost Item was left empty.
 
 ${defaults.reason || ''}`
-        );
+          );
+        }
       }
     } catch (error) {
       log.error({
