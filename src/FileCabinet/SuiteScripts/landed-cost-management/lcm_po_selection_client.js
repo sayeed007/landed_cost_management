@@ -2,10 +2,11 @@
  * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
-define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_config'], (
+define(['N/currentRecord', 'N/https', 'N/log', 'N/search', 'N/url', './lcm_po_selection_config'], (
   currentRecord,
   https,
   log,
+  search,
   url,
   config
 ) => {
@@ -97,11 +98,11 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     if (!costCategoryId && !costCategoryText) return;
 
     try {
-      const defaults = fetchCostProfileDefaults(costCategoryId, costCategoryText);
+      const defaults = getCostProfileDefaults(costCategoryId, costCategoryText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
-      if ((defaults.costCategoryText || costCategoryText) && !defaults.billItem) {
-        window.alert(`No active Bill Item was found with the same name as "${defaults.costCategoryText || costCategoryText}".`);
+      const itemSet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
+      if ((defaults.costCategoryText || costCategoryText) && !itemSet) {
+        window.alert(`No active LC Cost Item was found with the same name as "${defaults.costCategoryText || costCategoryText}".`);
       }
     } catch (error) {
       log.audit({
@@ -192,20 +193,55 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     return payload.defaults || {};
   }
 
-  function fetchCostProfileDefaults(costCategoryId, costCategoryText) {
-    const suiteletUrl = url.resolveScript({
-      scriptId: SCRIPTS.accountingSuitelet.scriptId,
-      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
-      params: {
-        action: 'costProfileDefaults',
-        costCategoryId,
-        costCategoryText,
-      },
-    });
-    const response = https.get({ url: suiteletUrl });
-    const payload = JSON.parse(response.body || '{}');
-    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return cost profile defaults.');
-    return payload.defaults || {};
+  function getCostProfileDefaults(costCategoryId, costCategoryText) {
+    const categoryText = String(costCategoryText || '').trim();
+    const billItem = findActiveItemByExactName(categoryText);
+    return {
+      costCategory: costCategoryId || '',
+      costCategoryText: categoryText,
+      billItem: billItem.id,
+      billItemText: billItem.text || categoryText,
+    };
+  }
+
+  function findActiveItemByExactName(itemName) {
+    if (!itemName) return { id: '', text: '' };
+    const attempts = [
+      ['itemid', 'is', itemName],
+      ['name', 'is', itemName],
+      ['displayname', 'is', itemName],
+    ];
+
+    for (let index = 0; index < attempts.length; index += 1) {
+      try {
+        const results = search
+          .create({
+            type: 'item',
+            filters: [['isinactive', 'is', 'F'], 'AND', attempts[index]],
+            columns: ['internalid', 'itemid', 'displayname'],
+          })
+          .run()
+          .getRange({ start: 0, end: 1 });
+
+        if (results && results.length) {
+          const result = results[0];
+          return {
+            id: String(result.getValue({ name: 'internalid' }) || ''),
+            text:
+              String(result.getValue({ name: 'itemid' }) || '') ||
+              String(result.getValue({ name: 'displayname' }) || '') ||
+              itemName,
+          };
+        }
+      } catch (error) {
+        log.audit({
+          title: 'LCM item lookup attempt failed',
+          details: `${attempts[index][0]}=${itemName}: ${error.message || error}`,
+        });
+      }
+    }
+
+    return { id: '', text: itemName };
   }
 
   function fetchAllocationMethodDefault(costCategoryId) {

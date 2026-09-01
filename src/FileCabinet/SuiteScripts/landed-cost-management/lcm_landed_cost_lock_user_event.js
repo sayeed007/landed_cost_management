@@ -11,6 +11,11 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
 ) => {
   const { FIELDS, RECORDS } = config;
 
+  function beforeLoad(context) {
+    if (!context.form) return;
+    context.form.clientScriptModulePath = './lcm_po_selection_client.js';
+  }
+
   function beforeSubmit(context) {
     const f = FIELDS.lcmLandedCosts;
     if (context.type === context.UserEventType.DELETE) return;
@@ -213,5 +218,5 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
     }
   }
 
-  return { beforeSubmit };
+  return { beforeLoad, beforeSubmit };
 });
