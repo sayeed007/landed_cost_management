@@ -9,7 +9,7 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
   config,
   accounting
 ) => {
-  const { FIELDS, RECORDS, LC_COST_PROFILES } = config;
+  const { FIELDS, RECORDS } = config;
 
   function beforeSubmit(context) {
     const f = FIELDS.lcmLandedCosts;
@@ -89,27 +89,14 @@ define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_a
 
   function sourceCostProfileRefs(rec) {
     const f = FIELDS.lcmLandedCosts;
-    const mapping = findCostProfileMapping(
+    const defaults = accounting.getCostProfileDefaults(
       rec.getValue({ fieldId: f.costProfile }),
       getTextIfPresent(rec, f.costProfile)
     );
-    if (!mapping) return;
+    if (!defaults.costCategory && !defaults.costCategoryText) return;
 
-    setValueOrText(rec, f.costCategory, mapping.costCategoryId, mapping.costCategoryText);
-    setValueOrText(rec, f.billItem, mapping.billItemId, mapping.billItemText);
-  }
-
-  function findCostProfileMapping(profileValue, profileText) {
-    const normalizedText = normalize(profileText).replace(/[^a-z0-9]/g, '');
-    const normalizedValue = normalize(profileValue).replace(/[^a-z0-9]/g, '');
-    for (let index = 0; index < LC_COST_PROFILES.length; index += 1) {
-      const mapping = LC_COST_PROFILES[index];
-      if (normalize(mapping.profileText).replace(/[^a-z0-9]/g, '') === normalizedText) return mapping;
-      if (mapping.profileValue && normalize(mapping.profileValue).replace(/[^a-z0-9]/g, '') === normalizedValue) {
-        return mapping;
-      }
-    }
-    return null;
+    setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
+    setValueOrText(rec, f.billItem, defaults.billItem, defaults.billItemText);
   }
 
   function sourceAllocationMethodDefault(rec) {

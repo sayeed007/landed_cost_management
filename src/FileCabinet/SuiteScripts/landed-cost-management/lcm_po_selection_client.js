@@ -9,7 +9,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   url,
   config
 ) => {
-  const { FIELDS, SUBLISTS, SCRIPTS, LC_COST_PROFILES } = config;
+  const { FIELDS, SUBLISTS, SCRIPTS } = config;
   let syncing = false;
 
   function normalizeIds(value) {
@@ -76,15 +76,25 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
   function syncCostProfileDefaults(rec, contextSublistId) {
     const sublistId = getLandedCostSublistId(contextSublistId);
-    const mapping = findCostProfileMapping(
-      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile),
-      getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.costProfile)
-    );
+    const costCategoryId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
+    const costCategoryText = getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
 
-    if (!mapping) return;
+    if (!costCategoryId && !costCategoryText) return;
 
-    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, mapping.costCategoryId, mapping.costCategoryText);
-    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, mapping.billItemId, mapping.billItemText);
+    try {
+      const defaults = fetchCostProfileDefaults(costCategoryId, costCategoryText);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
+      if ((defaults.costCategoryText || costCategoryText) && !defaults.billItem) {
+        window.alert(`No active Bill Item was found with the same name as "${defaults.costCategoryText || costCategoryText}".`);
+      }
+    } catch (error) {
+      log.audit({
+        title: 'LCM cost profile defaults were not sourced',
+        details: error.message || error,
+      });
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, costCategoryId, costCategoryText);
+    }
     copyHeaderDefaultsToLandedCostLine(rec, sublistId);
     syncAllocationMethodDefault(rec, contextSublistId);
   }
@@ -144,17 +154,6 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     return rec.getText({ fieldId });
   }
 
-  function findCostProfileMapping(profileValue, profileText) {
-    const normalizedText = normalizeChoice(profileText);
-    const normalizedValue = normalizeChoice(profileValue);
-    for (let index = 0; index < LC_COST_PROFILES.length; index += 1) {
-      const mapping = LC_COST_PROFILES[index];
-      if (normalizeChoice(mapping.profileText) === normalizedText) return mapping;
-      if (mapping.profileValue && normalizeChoice(mapping.profileValue) === normalizedValue) return mapping;
-    }
-    return null;
-  }
-
   function fetchVendorBillDefaults(vendorId) {
     const suiteletUrl = url.resolveScript({
       scriptId: SCRIPTS.accountingSuitelet.scriptId,
@@ -167,6 +166,22 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     const response = https.get({ url: suiteletUrl });
     const payload = JSON.parse(response.body || '{}');
     if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return vendor bill defaults.');
+    return payload.defaults || {};
+  }
+
+  function fetchCostProfileDefaults(costCategoryId, costCategoryText) {
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        action: 'costProfileDefaults',
+        costCategoryId,
+        costCategoryText,
+      },
+    });
+    const response = https.get({ url: suiteletUrl });
+    const payload = JSON.parse(response.body || '{}');
+    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return cost profile defaults.');
     return payload.defaults || {};
   }
 
@@ -379,12 +394,6 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
         details: error.message || error,
       });
     }
-  }
-
-  function normalizeChoice(value) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
   }
 
   return { fieldChanged, openLcmAccountingPreview, selectAllLcmTrackItems };

@@ -9,6 +9,8 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
         renderVendorDefaults(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'allocationMethodDefault') {
         renderAllocationMethodDefault(context);
+      } else if (context.request.method === 'GET' && context.request.parameters.action === 'costProfileDefaults') {
+        renderCostProfileDefaults(context);
       } else if (context.request.method === 'POST') {
         renderResult(context);
       } else {
@@ -39,6 +41,19 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
     const payload = {
       ok: Boolean(costCategoryId),
       defaults: costCategoryId ? accounting.getAllocationMethodDefault(costCategoryId) : {},
+    };
+    context.response.write(JSON.stringify(payload));
+  }
+
+  function renderCostProfileDefaults(context) {
+    const costCategoryId = context.request.parameters.costCategoryId || '';
+    const costCategoryText = context.request.parameters.costCategoryText || '';
+    const payload = {
+      ok: Boolean(costCategoryId || costCategoryText),
+      defaults:
+        costCategoryId || costCategoryText
+          ? accounting.getCostProfileDefaults(costCategoryId, costCategoryText)
+          : {},
     };
     context.response.write(JSON.stringify(payload));
   }

@@ -3,7 +3,7 @@
  * @NModuleScope SameAccount
  */
 define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'], (format, log, record, search, config) => {
-  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, LC_COST_PROFILES } = config;
+  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS } = config;
   const STATUS = {
     pending: 'Pending',
     created: 'Created',
@@ -13,6 +13,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     journal: 'journal',
   };
   const vendorDefaultsCache = {};
+  const costProfileDefaultsCache = {};
 
   function toNumber(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -282,29 +283,101 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function applyCostProfileDefaults(row) {
-    const mapping = findCostProfileMapping(row.costProfile, row.costProfileText);
-    if (!mapping) return row;
+    const defaults = getCostProfileDefaults(
+      row.costProfile || row.costCategory,
+      row.costProfileText || row.costCategoryText
+    );
+    if (!defaults.costCategory && !defaults.costCategoryText) return row;
 
     if (!row.costCategory) {
-      row.costCategory = mapping.costCategoryId || row.costCategory;
-      row.costCategoryText = mapping.costCategoryText || row.costCategoryText;
+      row.costCategory = defaults.costCategory || row.costCategory;
+      row.costCategoryText = defaults.costCategoryText || row.costCategoryText;
     }
     if (!row.billItem) {
-      row.billItem = mapping.billItemId || row.billItem;
-      row.billItemText = mapping.billItemText || row.billItemText;
+      row.billItem = defaults.billItem || row.billItem;
+      row.billItemText = defaults.billItemText || row.billItemText;
     }
     return row;
   }
 
-  function findCostProfileMapping(profileValue, profileText) {
-    const normalizedText = normalizeChoice(profileText);
-    const normalizedValue = normalizeChoice(profileValue);
-    for (let index = 0; index < LC_COST_PROFILES.length; index += 1) {
-      const mapping = LC_COST_PROFILES[index];
-      if (normalizeChoice(mapping.profileText) === normalizedText) return mapping;
-      if (mapping.profileValue && normalizeChoice(mapping.profileValue) === normalizedValue) return mapping;
+  function getCostProfileDefaults(costCategoryId, costCategoryText) {
+    const categoryId = normalizeValue(costCategoryId);
+    const categoryText = normalizeValue(costCategoryText) || lookupCostCategoryName(categoryId);
+    const cacheKey = `${categoryId}|${categoryText}`;
+    if (costProfileDefaultsCache[cacheKey]) return costProfileDefaultsCache[cacheKey];
+
+    const billItem = findActiveItemByExactName(categoryText);
+    costProfileDefaultsCache[cacheKey] = {
+      costCategory: categoryId,
+      costCategoryText: categoryText,
+      billItem: billItem.id,
+      billItemText: billItem.text,
+    };
+    return costProfileDefaultsCache[cacheKey];
+  }
+
+  function lookupCostCategoryName(costCategoryId) {
+    if (!costCategoryId) return '';
+    const attempts = [
+      { type: 'costcategory', columns: ['name'] },
+      { type: 'landedcostcategory', columns: ['name'] },
+    ];
+
+    for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
+      const attempt = attempts[attemptIndex];
+      try {
+        const values = search.lookupFields({
+          type: attempt.type,
+          id: costCategoryId,
+          columns: attempt.columns,
+        });
+        const name = extractLookupText(values.name) || extractLookupValue(values.name);
+        if (name) return name;
+      } catch (error) {
+        // Account-specific category records can expose different search type names.
+      }
     }
-    return null;
+    return '';
+  }
+
+  function findActiveItemByExactName(itemName) {
+    if (!itemName) return { id: '', text: '' };
+    const attempts = [
+      ['itemid', 'is', itemName],
+      ['name', 'is', itemName],
+      ['displayname', 'is', itemName],
+    ];
+
+    for (let index = 0; index < attempts.length; index += 1) {
+      try {
+        const results = search
+          .create({
+            type: search.Type.ITEM,
+            filters: [['isinactive', 'is', 'F'], 'AND', attempts[index]],
+            columns: ['internalid', 'itemid', 'displayname'],
+          })
+          .run()
+          .getRange({ start: 0, end: 1 });
+        if (results && results.length) {
+          const result = results[0];
+          return {
+            id: normalizeValue(result.getValue({ name: 'internalid' })),
+            text:
+              normalizeValue(result.getValue({ name: 'itemid' })) ||
+              normalizeValue(result.getValue({ name: 'displayname' })) ||
+              itemName,
+          };
+        }
+      } catch (error) {
+        // Try the next item-name field; accounts differ on what is searchable.
+      }
+    }
+
+    log.audit({
+      title: 'LCM matching bill item was not found',
+      details: `No active item was found with exact name "${itemName}".`,
+    });
+    return { id: '', text: '' };
   }
 
   function getVendorDefaults(vendorId) {
@@ -1084,6 +1157,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     createTransactions,
     fetchLandedCostRows,
     getAllocationMethodDefault,
+    getCostProfileDefaults,
     getVendorBillDefaults,
     getVendorDefaults,
     normalizeMode,

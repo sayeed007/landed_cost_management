@@ -98,33 +98,5 @@ define([], () => {
     journalCreditAccount: '',
   };
 
-  const LC_COST_PROFILES = [
-    {
-      profileText: 'LC - Freight',
-      costCategoryText: 'LC - Freight',
-      billItemText: 'LC - Freight',
-    },
-    {
-      profileText: 'LC - Duty',
-      costCategoryText: 'LC - Duty',
-      billItemText: 'LC - Duty',
-    },
-    {
-      profileText: 'LC - Insurance',
-      costCategoryText: 'LC - Insurance',
-      billItemText: 'LC - Insurance',
-    },
-    {
-      profileText: 'LC - Clearing',
-      costCategoryText: 'LC - Clearing',
-      billItemText: 'LC - Clearing',
-    },
-    {
-      profileText: 'LC - Other Charge',
-      costCategoryText: 'LC - Other Charge',
-      billItemText: 'LC - Other Charge',
-    },
-  ];
-
-  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, LC_COST_PROFILES };
+  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS };
 });
