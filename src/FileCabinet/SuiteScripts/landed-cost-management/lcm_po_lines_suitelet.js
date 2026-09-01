@@ -9,12 +9,14 @@ define(['N/log', './lcm_po_selection_lib'], (log, lib) => {
 
     try {
       const poIds = lib.normalizeIds(context.request.parameters.poIds || '');
-      const lines = lib.fetchPurchaseOrderItemLines(poIds);
+      const vendorId = context.request.parameters.vendorId || '';
+      const lines = lib.fetchPurchaseOrderItemLines(poIds, vendorId);
 
       response.write(
         JSON.stringify({
           ok: true,
           poIds,
+          vendorId,
           lines,
         })
       );

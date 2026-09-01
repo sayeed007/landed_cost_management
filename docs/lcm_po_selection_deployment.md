@@ -2,7 +2,7 @@
 
 ## Requirement Implemented
 
-Move PO selection to the `Landed Cost Management` header. When the header PO multi-select changes, the `LCM Items` subtab is refreshed from the selected PO item lines. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
+Move Vendor and PO selection to the `Landed Cost Management` header. When the header PO multi-select changes, the `LCM Items` subtab is refreshed from selected PO item lines that match the header Vendor. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
 
 ## NetSuite Records Found
 
@@ -16,13 +16,21 @@ Move PO selection to the `Landed Cost Management` header. When the header PO mul
 Create these before deploying the scripts:
 
 1. Parent field on `Landed Cost Management`
+   - Label: `Vendor`
+   - ID: `custrecord_lcm_vendor`
+   - Type: `List/Record`
+   - List/Record: `Vendor`
+   - Show on form header.
+
+2. Parent field on `Landed Cost Management`
    - Label: `Selected Purchase Orders`
    - ID: `custrecord_lcm_selected_pos`
    - Type: `Multiple Select`
    - List/Record: `Purchase Order`
+   - Filter: `Vendor` equals `custrecord_lcm_vendor`.
    - Show on form header.
 
-2. Child field on `LCM Items`
+3. Child field on `LCM Items`
    - Label: `PO Line Key`
    - ID: `custrecord_lcmitems_source_line_key`
    - Type: `Free-Form Text`
@@ -30,11 +38,18 @@ Create these before deploying the scripts:
    - Display Type: hidden/disabled
    - Purpose: duplicate guard using `parent LCM + PO + PO line unique key`.
 
-3. Child field on `LCM Items`
+4. Child field on `LCM Items`
    - Label: `Track Item`
    - ID: `custrecord_lcmitems_track_item`
    - Type: `Check Box`
    - Purpose: line-level flag for future processing work.
+
+5. Child field on `Landed Cost`
+   - Label: `LC Cost Profile`
+   - ID: `custrecord_lcm_lcm_cost_profile`
+   - Type: `List/Record`
+   - List/Record: `LCM Cost Profile`
+   - Purpose: visible LC-specific selector mapped by script to hidden native Cost Category and Bill Item references.
 
 ## Files
 
@@ -57,23 +72,25 @@ Upload all files into the same File Cabinet folder so the relative module import
 2. Client Script
    - File: `lcm_po_selection_client.js`
    - Attach to the `Landed Cost Management` custom record form.
-   - Trigger: `fieldChanged` on `custrecord_lcm_selected_pos`.
+   - Trigger: `fieldChanged` on `custrecord_lcm_vendor`, `custrecord_lcm_selected_pos`, and `custrecord_lcm_lcm_cost_profile`.
 
 3. User Event
    - File: `lcm_po_selection_user_event.js`
    - Deploy on `CUSTOMRECORD_LANDED_COST_MANAGEMENT`.
-   - `beforeLoad`: disables line-level PO field as read-only reference.
+   - `beforeLoad`: disables sourced parent/sublist fields as read-only references.
    - `afterSubmit`: server-side safety sync and deletion for removed POs.
 
 ## Behavior
 
-On header PO change:
+On header Vendor/PO change:
 
+- Source parent Subsidiary from the selected Vendor.
+- Filter/validate selected POs against the header Vendor.
 - Fetch selected PO item lines through the Suitelet.
 - Remove existing item subtab rows whose PO is no longer selected.
 - Add missing item rows for newly selected PO lines.
 - Keep existing rows for still-selected POs by matching `PO Line Key`.
-- Keep line-level PO as a read-only reference.
+- Keep PO-derived fields as read-only references.
 
 On save:
 
@@ -89,7 +106,7 @@ On save:
 - PO -> `custrecord_lcmitems_po`
 - Item -> `custrecord_lcmitems_item`
 - Memo/Item text -> `custrecord_lcmitems_description`
-- Vendor -> `custrecord_lcmitems_vendor`
+- Vendor -> `custrecord_lcmitems_vendor` hidden compatibility/reference field
 - PO quantity received -> `custrecord_lcmitems_receipt`
 - PO quantity -> `custrecord_lcmitem_ex_receipt`
 - PO quantity minus received -> `custrecord_lcmitems_quantity_remaining`

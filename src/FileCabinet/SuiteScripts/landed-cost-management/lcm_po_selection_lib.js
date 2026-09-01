@@ -25,17 +25,31 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return `${poId}:line:${lineIndex}:item:${itemId || ''}`;
   }
 
-  function fetchPurchaseOrderHeaders(poIds) {
+  function normalizeVendorId(vendorId) {
+    return String(vendorId || '').trim();
+  }
+
+  function appendVendorFilter(filters, vendorId) {
+    const normalizedVendorId = normalizeVendorId(vendorId);
+    if (!normalizedVendorId) return filters;
+    return filters.concat(['AND', ['entity', 'anyof', normalizedVendorId]]);
+  }
+
+  function fetchPurchaseOrderHeaders(poIds, vendorIdInput) {
     const headersById = {};
+    const filters = appendVendorFilter(
+      [
+        ['internalid', 'anyof', poIds],
+        'AND',
+        ['mainline', 'is', 'T'],
+      ],
+      vendorIdInput
+    );
 
     search
       .create({
         type: search.Type.PURCHASE_ORDER,
-        filters: [
-          ['internalid', 'anyof', poIds],
-          'AND',
-          ['mainline', 'is', 'T'],
-        ],
+        filters,
         columns: ['internalid', 'tranid', 'entity'],
       })
       .run()
@@ -53,15 +67,49 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return headersById;
   }
 
-  function fetchPurchaseOrderItemLines(poIdsInput) {
+  function validatePurchaseOrderVendor(poIdsInput, vendorIdInput) {
+    const poIds = normalizeIds(poIdsInput);
+    const vendorId = normalizeVendorId(vendorIdInput);
+    if (!poIds.length || !vendorId) return;
+
+    const mismatches = [];
+    search
+      .create({
+        type: search.Type.PURCHASE_ORDER,
+        filters: [
+          ['internalid', 'anyof', poIds],
+          'AND',
+          ['mainline', 'is', 'T'],
+          'AND',
+          ['entity', 'noneof', vendorId],
+        ],
+        columns: ['internalid', 'tranid', 'entity'],
+      })
+      .run()
+      .each((result) => {
+        mismatches.push(
+          `${result.getValue({ name: 'tranid' }) || result.getValue({ name: 'internalid' })} / ${
+            result.getText({ name: 'entity' }) || result.getValue({ name: 'entity' }) || 'no vendor'
+          }`
+        );
+        return mismatches.length < 10;
+      });
+
+    if (mismatches.length) {
+      throw new Error(`Selected Purchase Orders must match the LCM Vendor. Mismatched PO(s): ${mismatches.join(', ')}`);
+    }
+  }
+
+  function fetchPurchaseOrderItemLines(poIdsInput, vendorIdInput) {
     const poIds = normalizeIds(poIdsInput);
     if (!poIds.length) return [];
 
     const rows = [];
-    const headersById = fetchPurchaseOrderHeaders(poIds);
-    const poSearch = search.create({
-      type: search.Type.PURCHASE_ORDER,
-      filters: [
+    const vendorId = normalizeVendorId(vendorIdInput);
+    validatePurchaseOrderVendor(poIds, vendorId);
+    const headersById = fetchPurchaseOrderHeaders(poIds, vendorId);
+    const filters = appendVendorFilter(
+      [
         ['internalid', 'anyof', poIds],
         'AND',
         ['mainline', 'is', 'F'],
@@ -72,6 +120,11 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
         'AND',
         ['item', 'noneof', '@NONE@'],
       ],
+      vendorId
+    );
+    const poSearch = search.create({
+      type: search.Type.PURCHASE_ORDER,
+      filters,
       columns: [
         search.createColumn({ name: 'internalid', sort: search.Sort.ASC }),
         'tranid',
@@ -233,6 +286,45 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     values[fieldId] = nextValue;
   }
 
+  function getVendorDefaults(vendorId) {
+    const subsidiary = lookupVendorField(vendorId, 'subsidiary');
+    return {
+      subsidiary: subsidiary.value,
+      subsidiaryText: subsidiary.text,
+    };
+  }
+
+  function lookupVendorField(vendorId, fieldId) {
+    if (!vendorId) return { value: '', text: '' };
+    try {
+      const values = search.lookupFields({
+        type: search.Type.VENDOR,
+        id: vendorId,
+        columns: [fieldId],
+      });
+      return {
+        value: extractLookupValue(values[fieldId]),
+        text: extractLookupText(values[fieldId]),
+      };
+    } catch (error) {
+      return { value: '', text: '' };
+    }
+  }
+
+  function extractLookupValue(value) {
+    if (!value) return '';
+    if (Array.isArray(value)) return value.length ? String(value[0].value || value[0]) : '';
+    if (typeof value === 'object') return String(value.value || '');
+    return String(value);
+  }
+
+  function extractLookupText(value) {
+    if (!value) return '';
+    if (Array.isArray(value)) return value.length ? String(value[0].text || value[0].value || '') : '';
+    if (typeof value === 'object') return String(value.text || value.value || '');
+    return String(value);
+  }
+
   function normalizeComparable(value) {
     if (value === null || value === undefined) return '';
     return String(value);
@@ -257,7 +349,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return { rowsByKey, rowsWithoutKey };
   }
 
-  function syncPersistedItems(parentId, selectedPoIdsInput) {
+  function syncPersistedItems(parentId, selectedPoIdsInput, vendorIdInput) {
     const selectedPoIds = normalizeIds(selectedPoIdsInput);
     const existing = loadExistingItemsByKey(parentId);
     const createdKeys = new Set();
@@ -265,7 +357,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     let updatedCount = 0;
     let deletedCount = 0;
 
-    const poLines = fetchPurchaseOrderItemLines(selectedPoIds);
+    const poLines = fetchPurchaseOrderItemLines(selectedPoIds, vendorIdInput);
     poLines.forEach((line) => {
       if (line.poLineKey && createdKeys.has(line.poLineKey)) return;
       const existingRow = line.poLineKey ? existing.rowsByKey[line.poLineKey] : null;
@@ -326,7 +418,9 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
   return {
     normalizeIds,
     fetchPurchaseOrderItemLines,
+    getVendorDefaults,
     hasCreatedAccountingRows,
     syncPersistedItems,
+    validatePurchaseOrderVendor,
   };
 });

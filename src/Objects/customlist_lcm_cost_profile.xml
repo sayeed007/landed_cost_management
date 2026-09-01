@@ -1,0 +1,28 @@
+<customlist scriptid="customlist_lcm_cost_profile">
+  <description>Visible LC-specific landed cost selector. SuiteScripts map each value to the matching native Cost Category and Bill Item.</description>
+  <isinactive>F</isinactive>
+  <isordered>T</isordered>
+  <name>LCM Cost Profile</name>
+  <customvalues>
+    <customvalue scriptid="val_lcm_cost_profile_freight">
+      <isinactive>F</isinactive>
+      <value>LC - Freight</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_cost_profile_duty">
+      <isinactive>F</isinactive>
+      <value>LC - Duty</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_cost_profile_insurance">
+      <isinactive>F</isinactive>
+      <value>LC - Insurance</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_cost_profile_clearing">
+      <isinactive>F</isinactive>
+      <value>LC - Clearing</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_cost_profile_other">
+      <isinactive>F</isinactive>
+      <value>LC - Other Charge</value>
+    </customvalue>
+  </customvalues>
+</customlist>

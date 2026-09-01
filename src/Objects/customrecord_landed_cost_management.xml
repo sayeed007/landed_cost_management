@@ -133,7 +133,7 @@
       <defaultchecked>F</defaultchecked>
       <defaultselection></defaultselection>
       <defaultvalue></defaultvalue>
-      <description>Subsidiary</description>
+      <description>Subsidiary sourced from the selected Vendor.</description>
       <displayheight></displayheight>
       <displaytype>NORMAL</displaytype>
       <displaywidth></displaywidth>
@@ -158,6 +158,47 @@
       <searchdefault></searchdefault>
       <searchlevel>2</searchlevel>
       <selectrecordtype>-117</selectrecordtype>
+      <showinlist>T</showinlist>
+      <sourcefilterby></sourcefilterby>
+      <sourcefrom></sourcefrom>
+      <sourcelist></sourcelist>
+      <storevalue>T</storevalue>
+      <subtab></subtab>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_lcm_vendor">
+      <accesslevel>2</accesslevel>
+      <aidescription></aidescription>
+      <allowquickadd>F</allowquickadd>
+      <applyformatting>F</applyformatting>
+      <checkspelling>F</checkspelling>
+      <defaultchecked>F</defaultchecked>
+      <defaultselection></defaultselection>
+      <defaultvalue></defaultvalue>
+      <description>Header vendor for PO selection and generated landed-cost accounting.</description>
+      <displayheight></displayheight>
+      <displaytype>NORMAL</displaytype>
+      <displaywidth></displaywidth>
+      <dynamicdefault></dynamicdefault>
+      <enabletextenhance>F</enabletextenhance>
+      <encryptatrest>F</encryptatrest>
+      <fieldtype>SELECT</fieldtype>
+      <globalsearch>F</globalsearch>
+      <help></help>
+      <isformula>F</isformula>
+      <ismandatory>F</ismandatory>
+      <isparent>F</isparent>
+      <label>Vendor</label>
+      <linktext></linktext>
+      <maxlength></maxlength>
+      <maxvalue></maxvalue>
+      <minvalue></minvalue>
+      <onparentdelete>NO_ACTION</onparentdelete>
+      <parentsubtab></parentsubtab>
+      <rolerestrict>F</rolerestrict>
+      <searchcomparefield></searchcomparefield>
+      <searchdefault></searchdefault>
+      <searchlevel>2</searchlevel>
+      <selectrecordtype>-3</selectrecordtype>
       <showinlist>T</showinlist>
       <sourcefilterby></sourcefilterby>
       <sourcefrom></sourcefrom>
@@ -952,6 +993,16 @@
           <fldfilternotnull>F</fldfilternotnull>
           <fldfilternull>F</fldfilternull>
           <fldfiltersel>PURCHASEORDER</fldfiltersel>
+          <fldfilterval></fldfilterval>
+        </customfieldfilter>
+        <customfieldfilter>
+          <fldcomparefield>[scriptid=customrecord_landed_cost_management.custrecord_lcm_vendor]</fldcomparefield>
+          <fldfilter>STDBODYVENDOR</fldfilter>
+          <fldfilterchecked></fldfilterchecked>
+          <fldfiltercomparetype>EQ</fldfiltercomparetype>
+          <fldfilternotnull>F</fldfilternotnull>
+          <fldfilternull>F</fldfilternull>
+          <fldfiltersel></fldfiltersel>
           <fldfilterval></fldfilterval>
         </customfieldfilter>
       </customfieldfilters>

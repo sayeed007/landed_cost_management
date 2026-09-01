@@ -11,8 +11,8 @@ define([], () => {
 
   const FIELDS = {
     landedCostManagement: {
-      // Create this as a body field on Landed Cost Management:
-      // Type: Multiple Select, List/Record: Purchase Order
+      vendor: 'custrecord_lcm_vendor',
+      subsidiary: 'custrecord_lcm_subsidiary',
       selectedPurchaseOrders: 'custrecord_lcm_selected_pos',
     },
     lcmItems: {
@@ -42,6 +42,7 @@ define([], () => {
       billType: 'custrecord_lcm_lcm_cost_bill_type',
       vendor: 'custrecord_lcm_lcm_vendor',
       subsidiary: 'custrecord_lcm_lcm_subsidiary',
+      costProfile: 'custrecord_lcm_lcm_cost_profile',
       costCategory: 'custrecord_lcm_lcm_cost_category',
       amount: 'custrecord_lcm_lcm_amout',
       currency: 'custrecord_lcm_lcm_currency',
@@ -90,5 +91,39 @@ define([], () => {
     },
   };
 
-  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS };
+  const ACCOUNT_CONSTANTS = {
+    // Configure these account-specific internal IDs before relying on new Journal rows.
+    journalDebitAccount: '',
+    journalCreditAccount: '',
+  };
+
+  const LC_COST_PROFILES = [
+    {
+      profileText: 'LC - Freight',
+      costCategoryText: 'LC - Freight',
+      billItemText: 'LC - Freight',
+    },
+    {
+      profileText: 'LC - Duty',
+      costCategoryText: 'LC - Duty',
+      billItemText: 'LC - Duty',
+    },
+    {
+      profileText: 'LC - Insurance',
+      costCategoryText: 'LC - Insurance',
+      billItemText: 'LC - Insurance',
+    },
+    {
+      profileText: 'LC - Clearing',
+      costCategoryText: 'LC - Clearing',
+      billItemText: 'LC - Clearing',
+    },
+    {
+      profileText: 'LC - Other Charge',
+      costCategoryText: 'LC - Other Charge',
+      billItemText: 'LC - Other Charge',
+    },
+  ];
+
+  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, LC_COST_PROFILES };
 });

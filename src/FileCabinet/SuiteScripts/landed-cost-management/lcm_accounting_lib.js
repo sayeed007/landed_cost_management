@@ -3,7 +3,7 @@
  * @NModuleScope SameAccount
  */
 define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'], (format, log, record, search, config) => {
-  const { RECORDS, FIELDS, TRANSACTION_FIELDS } = config;
+  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, LC_COST_PROFILES } = config;
   const STATUS = {
     pending: 'Pending',
     created: 'Created',
@@ -141,6 +141,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   function fetchLandedCostRows(parentId) {
     if (!parentId) return [];
     const f = FIELDS.lcmLandedCosts;
+    const parentDefaults = getParentAccountingDefaults(parentId);
     const columns = [
       'internalid',
       f.parent,
@@ -149,6 +150,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       f.billType,
       f.vendor,
       f.subsidiary,
+      f.costProfile,
       f.costCategory,
       f.amount,
       f.currency,
@@ -200,6 +202,8 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           vendorText: getText(result, f.vendor),
           subsidiary: getValue(result, f.subsidiary),
           subsidiaryText: getText(result, f.subsidiary),
+          costProfile: getValue(result, f.costProfile),
+          costProfileText: getText(result, f.costProfile),
           costCategory: getValue(result, f.costCategory),
           costCategoryText: getText(result, f.costCategory),
           amount: toNumber(getValue(result, f.amount)),
@@ -210,7 +214,9 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           allocationMethod: getValue(result, f.allocationMethod),
           allocationMethodText: getText(result, f.allocationMethod),
           expenseAccount: getValue(result, f.expenseAccount),
+          expenseAccountText: getText(result, f.expenseAccount),
           billItem: getValue(result, f.billItem),
+          billItemText: getText(result, f.billItem),
           debitAccount: getValue(result, f.debitAccount),
           creditAccount: getValue(result, f.creditAccount),
           department: getValue(result, f.department),
@@ -226,7 +232,38 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
         return true;
       });
 
-    return rows.map(enrichRowFromVendor);
+    return rows.map((row) => enrichRow(row, parentDefaults));
+  }
+
+  function getParentAccountingDefaults(parentId) {
+    try {
+      const rec = record.load({
+        type: RECORDS.landedCostManagement,
+        id: parentId,
+        isDynamic: false,
+      });
+      return {
+        vendor: getRecordValue(rec, FIELDS.landedCostManagement.vendor),
+        vendorText: getRecordText(rec, FIELDS.landedCostManagement.vendor),
+        subsidiary: getRecordValue(rec, FIELDS.landedCostManagement.subsidiary),
+        subsidiaryText: getRecordText(rec, FIELDS.landedCostManagement.subsidiary),
+      };
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function enrichRow(row, parentDefaults) {
+    if (!row.vendor && parentDefaults.vendor) {
+      row.vendor = parentDefaults.vendor;
+      row.vendorText = parentDefaults.vendorText || row.vendorText;
+    }
+    if (!row.subsidiary && parentDefaults.subsidiary) {
+      row.subsidiary = parentDefaults.subsidiary;
+      row.subsidiaryText = parentDefaults.subsidiaryText || row.subsidiaryText;
+    }
+    applyCostProfileDefaults(row);
+    return enrichRowFromVendor(row);
   }
 
   function enrichRowFromVendor(row) {
@@ -242,6 +279,32 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     }
 
     return row;
+  }
+
+  function applyCostProfileDefaults(row) {
+    const mapping = findCostProfileMapping(row.costProfile, row.costProfileText);
+    if (!mapping) return row;
+
+    if (!row.costCategory) {
+      row.costCategory = mapping.costCategoryId || row.costCategory;
+      row.costCategoryText = mapping.costCategoryText || row.costCategoryText;
+    }
+    if (!row.billItem) {
+      row.billItem = mapping.billItemId || row.billItem;
+      row.billItemText = mapping.billItemText || row.billItemText;
+    }
+    return row;
+  }
+
+  function findCostProfileMapping(profileValue, profileText) {
+    const normalizedText = normalizeChoice(profileText);
+    const normalizedValue = normalizeChoice(profileValue);
+    for (let index = 0; index < LC_COST_PROFILES.length; index += 1) {
+      const mapping = LC_COST_PROFILES[index];
+      if (normalizeChoice(mapping.profileText) === normalizedText) return mapping;
+      if (mapping.profileValue && normalizeChoice(mapping.profileValue) === normalizedValue) return mapping;
+    }
+    return null;
   }
 
   function getVendorDefaults(vendorId) {
@@ -404,17 +467,22 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       if (!row.vendor) errors.push('Vendor is required for Vendor Bill');
       if (!row.billType) errors.push('Bill Type is required for Vendor Bill');
       if (!lineType) errors.push('Bill Line Type is required');
-      if (!row.costCategory) errors.push('Cost Category is required for landed-cost bill lines');
+      if (!row.costProfile && !row.costProfileText) errors.push('LC Cost Profile is required');
+      if (!row.costCategory && !row.costCategoryText) {
+        errors.push('Cost Category is required for landed-cost bill lines');
+      }
       if (lineType.indexOf('expense') >= 0 && !row.expenseAccount) {
         errors.push('Expense Account is required for expense bill lines');
       }
-      if (lineType.indexOf('item') >= 0 && !row.billItem) {
+      if (lineType.indexOf('item') >= 0 && !row.billItem && !row.billItemText) {
         errors.push('Bill Item is required for item bill lines');
       }
     } else {
-      if (!row.debitAccount) errors.push('Debit Account is required for Journal Entry');
-      if (!row.creditAccount) errors.push('Credit Account is required for Journal Entry');
-      if (row.debitAccount && row.creditAccount && row.debitAccount === row.creditAccount) {
+      const debitAccount = getJournalDebitAccount(row);
+      const creditAccount = getJournalCreditAccount(row);
+      if (!debitAccount) errors.push('Configured Debit Account is required for Journal Entry');
+      if (!creditAccount) errors.push('Configured Credit Account is required for Journal Entry');
+      if (debitAccount && creditAccount && debitAccount === creditAccount) {
         errors.push('Debit Account and Credit Account must be different');
       }
     }
@@ -517,7 +585,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function addVendorBillExpenseLine(bill, row) {
     bill.selectNewLine({ sublistId: 'expense' });
-    setCurrentIfPresent(bill, 'expense', 'account', row.expenseAccount);
+    setCurrentSublistFieldByValueOrText(bill, 'expense', 'account', [row.expenseAccount], [row.expenseAccountText]);
     setCurrentIfPresent(bill, 'expense', 'amount', row.amount);
     setCurrentIfPresent(bill, 'expense', 'memo', row.memo || row.costCategoryText);
     setClassifications(bill, 'expense', row);
@@ -526,7 +594,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function addVendorBillItemLine(bill, row) {
     bill.selectNewLine({ sublistId: 'item' });
-    setCurrentIfPresent(bill, 'item', 'item', row.billItem);
+    setCurrentSublistFieldByValueOrText(bill, 'item', 'item', [row.billItem], [row.billItemText]);
     setCurrentIfPresent(bill, 'item', 'quantity', 1);
     setCurrentIfPresent(bill, 'item', 'rate', row.amount);
     setCurrentIfPresent(bill, 'item', 'amount', row.amount);
@@ -539,7 +607,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function setVendorBillLineCostCategory(bill, row) {
-    if (!row.costCategory) return false;
+    if (!row.costCategory && !row.costCategoryText) return false;
     const done = setCurrentSublistFieldByValueOrText(
       bill,
       'item',
@@ -658,9 +726,10 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   function applyVendorBillLandedCostSummary(bill, rows) {
     const totalsByCategory = {};
     (rows || []).forEach((row) => {
-      if (!row.costCategory) return;
-      if (!totalsByCategory[row.costCategory]) {
-        totalsByCategory[row.costCategory] = {
+      const categoryKey = row.costCategory || row.costCategoryText;
+      if (!categoryKey) return;
+      if (!totalsByCategory[categoryKey]) {
+        totalsByCategory[categoryKey] = {
           id: row.costCategory,
           text: row.costCategoryText,
           amount: 0,
@@ -668,11 +737,11 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           hasItem: false,
         };
       }
-      totalsByCategory[row.costCategory].amount += row.amount || 0;
+      totalsByCategory[categoryKey].amount += row.amount || 0;
       if (normalizeChoice(row.billLineTypeText || row.billLineType).indexOf('item') >= 0) {
-        totalsByCategory[row.costCategory].hasItem = true;
+        totalsByCategory[categoryKey].hasItem = true;
       } else {
-        totalsByCategory[row.costCategory].hasExpense = true;
+        totalsByCategory[categoryKey].hasExpense = true;
       }
     });
 
@@ -822,11 +891,19 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function addJournalLine(journal, row, side) {
     journal.selectNewLine({ sublistId: 'line' });
-    setCurrentIfPresent(journal, 'line', 'account', side === 'debit' ? row.debitAccount : row.creditAccount);
+    setCurrentIfPresent(journal, 'line', 'account', side === 'debit' ? getJournalDebitAccount(row) : getJournalCreditAccount(row));
     setCurrentIfPresent(journal, 'line', side, row.amount);
     setCurrentIfPresent(journal, 'line', 'memo', row.memo || row.costCategoryText);
     setClassifications(journal, 'line', row);
     journal.commitLine({ sublistId: 'line' });
+  }
+
+  function getJournalDebitAccount(row) {
+    return ACCOUNT_CONSTANTS.journalDebitAccount || row.debitAccount || '';
+  }
+
+  function getJournalCreditAccount(row) {
+    return ACCOUNT_CONSTANTS.journalCreditAccount || row.creditAccount || '';
   }
 
   function allocateCreatedCosts(parentId, rows) {

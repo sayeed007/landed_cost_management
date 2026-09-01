@@ -22,7 +22,8 @@ This document is the working record and field reference for the Landed Cost Mana
 | --- | --- | --- | --- |
 | Shipment Number | `custrecord_lcm_shipment_number` | Text | LCM/shipment reference number. |
 | Shipment Date | `custrecord_lcm_shipment_date` | Date | Shipment date for the landed cost record. |
-| Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context. |
+| Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
+| Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor for selected PO filtering and generated landed-cost accounting. |
 | LC Loan Number | `custrecord_lcm_lc_laon_number` | Text | LC loan number. Existing spelling in NetSuite is `laon`. |
 | Master PI Number | `custrecord_lcm_master_pi_number` | Text | Master PI reference. |
 | LC Number | `custrecord_lcm_lc_number` | Text | Letter of Credit number. |
@@ -41,7 +42,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | LC Cover Note No. | `custrecord_lc_cover_note_no` | Text | LC cover note number. |
 | IRC NO. | `custrecord_lcm_irc_no` | Text | IRC reference number. |
 | Air/ Vassel Name | `custrecord_lcm_air_vassel_name` | Text | Vessel/air carrier name. Existing label spelling is `Vassel`. |
-| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Header-level PO selector. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
+| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Header-level PO selector filtered/validated by Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
 | Unused PO Line Key | `custrecord_lcmitems_po_line_key` | Hidden text | Accidental parent-scoped field from an early deployment attempt. It is hidden and not used by scripts. Correct child line key is `custrecord_lcmitems_source_line_key`. |
 
 ## 2. Child Custom Record: LCM Items
@@ -54,7 +55,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | SDF object | `src/Objects/customrecord_lcmitems.xml` |
 | Parent link | `custrecord_lcm_lcm_hidden_lcm_item` |
 | Parent subtab | `Items` tab on Landed Cost Management |
-| Purpose | Generated item-level rows from selected Purchase Order item lines. These rows provide the item, PO, vendor, quantity, rate, and tracking context for later landed-cost work. |
+| Purpose | Generated item-level rows from selected Purchase Order item lines. These rows provide the item, PO, quantity, rate, and tracking context for later landed-cost work. |
 
 ### LCM Items Field Reference
 
@@ -62,7 +63,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | --- | --- | --- | --- |
 | Track Item | `custrecord_lcmitems_track_item` | Checkbox | Line-level marker for future processing. Placed first in the field order so it appears at the beginning of the child sublist when form layout follows record field order. |
 | PO | `custrecord_lcmitems_po` | Select, Purchase Order (`-30`) | Read-only reference to the PO that produced the item line. Script sets this from the PO internal ID; NetSuite displays the PO number (`tranid`). |
-| Vendor Name | `custrecord_lcmitems_vendor` | Select, Vendor (`-3`) | Vendor from the PO header entity. Script sets this before setting PO because the PO field is vendor-filtered. |
+| Vendor Name | `custrecord_lcmitems_vendor` | Hidden select, Vendor (`-3`) | Hidden compatibility/reference value sourced from the parent Vendor/PO header. Users select Vendor on the parent record. |
 | Item | `custrecord_lcmitems_item` | Select, Item (`-10`) | Item from the PO item line. |
 | Description | `custrecord_lcmitems_description` | Text Area | Item/line description from the PO line; falls back to item text if memo is empty. |
 | Unit Type | `custrecord_lcmitems_unit_type` | Text | Unit text from the PO line. |
@@ -97,18 +98,19 @@ This document is the working record and field reference for the Landed Cost Mana
 | Target Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Select, `customlist_lcm_bill_line_type` | Chooses whether a Bill row creates an Expense line or Item line. |
 | Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Select, `customlist_bill_type` | Existing Vendor Bill body Bill Type source. Set on generated Vendor Bills as `custbody12`. Values include Regular Bill and LC Bill. |
-| Vendor | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Vendor Bill header vendor. Selecting vendor sources matching available defaults from a dynamic Vendor Bill draft. Bill rows are grouped by vendor, subsidiary, and Bill Type. |
-| Subsidiary | `custrecord_lcm_lcm_subsidiary` | Select, Subsidiary (`-117`) | Subsidiary for generated Vendor Bills and Journal Entries. Sourced from selected vendor when possible. |
-| Cost Category | `custrecord_lcm_lcm_cost_category` | Select/List | Cost category for the landed-cost charge. NetSuite metadata identifies the target as internal record/list `-155`. |
+| Vendor | `custrecord_lcm_lcm_vendor` | Hidden select, Vendor (`-3`) | Compatibility/reference field sourced from parent Vendor. Users do not edit Vendor per Landed Cost row. |
+| Subsidiary | `custrecord_lcm_lcm_subsidiary` | Select, Subsidiary (`-117`) | Read-only form field sourced from parent Vendor/parent Subsidiary for generated Vendor Bills and Journal Entries. |
+| LC Cost Profile | `custrecord_lcm_lcm_cost_profile` | Select, `customlist_lcm_cost_profile` | Visible LC-specific selector. Scripts map each value to hidden native Cost Category and Bill Item references. |
+| Cost Category | `custrecord_lcm_lcm_cost_category` | Hidden select/list | Hidden native Cost Category for the landed-cost charge. NetSuite metadata identifies the target as internal record/list `-155`. |
 | Amount | `custrecord_lcm_lcm_amout` | Currency | Landed-cost amount. Existing field ID spelling is `amout`. |
 | Currency | `custrecord_lcm_lcm_currency` | Select/List | Currency context for the landed-cost amount. Sourced from selected vendor through a dynamic Vendor Bill draft when possible. Generated Vendor Bills/Journals let NetSuite source valid transaction currency from vendor/subsidiary. |
 | Exchange Rate | `custrecord_lcm_lcm_exchange_rate` | Currency/number | Exchange rate for the landed-cost charge. Sourced from selected vendor through a dynamic Vendor Bill draft when possible. |
 | Effective Date | `custrecord_lcm_lcm_effective_date` | Date | Effective date for landed-cost allocation/accounting. |
 | Allocation Method | `custrecord_lcm_lcm_allo_method` | Select, `customlist_lcm_allocation_method` | Allocation method for distributing landed cost to checked item rows. Defaults to `Value`; generated Vendor Bills copy it to `Landed Cost > Cost Allocation Method`. |
 | Expense Account | `custrecord_lcm_lcm_expense_account` | Select, Account (`-112`) | Account used when a Bill row creates an Expense line. Sourced from selected vendor when possible. |
-| Bill Item | `custrecord_lcm_lcm_bill_item` | Select, Item (`-10`) | Item used when a Bill row creates an Item line. |
-| Debit Account | `custrecord_lcm_lcm_debit_account` | Select, Account (`-112`) | Debit account for Journal Entry creation. |
-| Credit Account | `custrecord_lcm_lcm_credit_account` | Select, Account (`-112`) | Credit account for Journal Entry creation. |
+| Bill Item | `custrecord_lcm_lcm_bill_item` | Hidden select, Item (`-10`) | Hidden native item used when a Bill row creates an Item line; sourced from LC Cost Profile. |
+| Debit Account | `custrecord_lcm_lcm_debit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constants. |
+| Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constants. |
 | Department | `custrecord_lcm_lcm_department` | Select, Department (`-102`) | Optional accounting classification copied to generated transaction lines. |
 | Class | `custrecord_lcm_lcm_class` | Select, Class (`-101`) | Optional accounting classification copied to generated transaction lines. |
 | Location | `custrecord_lcm_lcm_location` | Select, Location (`-103`) | Optional accounting classification copied to generated transaction lines. |

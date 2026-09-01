@@ -1,6 +1,6 @@
 # Landed Cost Management - Implemented Requirements
 
-Last updated: 2026-08-27
+Last updated: 2026-09-01
 
 This document tracks implemented behavior for the Landed Cost Management customization. Extend this file chunk by chunk as new requirements are added. For record and field references, see [lcm_record_reference_and_requirements.md](./lcm_record_reference_and_requirements.md).
 
@@ -10,9 +10,12 @@ Users should select Purchase Orders once at the root/header level instead of cho
 
 Implemented behavior:
 
+- Added root field `Vendor` (`custrecord_lcm_vendor`) as the header vendor for PO selection and landed-cost accounting.
 - Added root field `Selected Purchase Orders` (`custrecord_lcm_selected_pos`) as a multi-select Purchase Order field.
+- The root `Subsidiary` field (`custrecord_lcm_subsidiary`) is sourced from the selected vendor and disabled on the form by User Event `beforeLoad`.
 - The existing child line `PO` field remains as a reference field on `LCM Items`.
-- The child `PO` field is made read-only/disabled by User Event `beforeLoad`.
+- PO selection is filtered and validated by the root vendor to prevent mixed-vendor LCM records.
+- PO-sourced child fields are made read-only/disabled by User Event `beforeLoad`.
 - Line-level PO changes are not used to trigger item population.
 
 Rationale:
@@ -29,7 +32,7 @@ Implemented behavior:
 - Client Script watches `custrecord_lcm_selected_pos` in `fieldChanged`.
 - On change, the script calls a Suitelet to fetch PO item lines.
 - The client clears the current `Items` sublist and rebuilds it from the selected PO lines.
-- Each generated child line is populated with vendor, PO, item, description, quantities, unit, rate, exchange rate, track checkbox default, and PO line key.
+- Each generated child line is populated with hidden vendor reference, PO, item, description, quantities, unit, rate, exchange rate, track checkbox default, and PO line key.
 
 Current field mapping:
 
@@ -51,7 +54,7 @@ Current field mapping:
 
 Implementation detail:
 
-- Vendor is set before PO because the PO field has a Vendor filter.
+- Vendor is stored as a hidden compatibility/reference value; users select vendor once on the parent record.
 - PO uses the PO internal ID. NetSuite displays the transaction number (`tranid`) to users.
 
 ## 3. Delete/Rebuild Behavior Instead of Dedupe
@@ -120,7 +123,9 @@ Open caveat:
 - PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, `Unit Landed Cost`, and `Total Unit Cost`.
 - After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values.
 - Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts source it from SDF-managed child field `custrecord_lcm_lcm_cost_bill_type`.
-- When a Vendor is selected on a Landed Cost row, the client calls the accounting Suitelet to source NetSuite defaults. The LCM row is populated with matching available fields: Subsidiary, Currency, Exchange Rate, Bill Type, and Expense Account. Each field is applied independently so one unavailable/invalid account field does not block the remaining defaults.
+- Landed Cost rows inherit Vendor and Subsidiary from the parent record. The line-level Vendor field is hidden and retained only as a compatibility/reference field.
+- Users select `LC Cost Profile`; scripts map that profile to hidden native Cost Category and Bill Item references. The profile list values currently assume matching NetSuite native Cost Category and Item names such as `LC - Freight`.
+- The client and child User Event source matching available defaults: Subsidiary, Currency, Exchange Rate, Bill Type, Expense Account, Allocation Method, Cost Category, and Bill Item. Each field is applied independently so one unavailable/invalid account field does not block the remaining defaults.
 
 ## 9. Bill and Journal Creation
 
@@ -128,7 +133,7 @@ Landed Cost rows now drive accounting creation from the `Landed Cost` child subl
 
 Implemented behavior:
 
-- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, Bill Type, vendor, subsidiary, currency, Bill line type, expense/item details, Journal Entry debit/credit accounts, classifications, memo, processing status, and created transaction references.
+- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, Bill Type, LC Cost Profile, hidden vendor/subsidiary/native cost references, currency, Bill line type, expense details, classifications, memo, processing status, and created transaction references.
 - Added root record buttons on saved/viewed LCM records:
   - `Create Bill`
   - `Create Journal`
@@ -144,7 +149,7 @@ Implemented behavior:
   - `Bill Line Type` is `Item`. NetSuite `expense` lines cannot carry a Landed Cost Category.
   - `Bill Item` is a non-inventory/service/other-charge item. Inventory items are allocation targets, not cost carriers.
   - `Cost Category` is a Cost Category whose type is `Landed Cost`, and the `Landed Cost` feature is enabled at Setup > Company > Enable Features > Items & Inventory.
-- `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from explicit debit/credit accounts.
+- `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from fixed account constants in `lcm_po_selection_config.js`. Deprecated Debit Account and Credit Account fields are hidden and used only as fallback for legacy rows until constants are configured.
 - If uncreated rows match a group that already has a created Vendor Bill or Journal Entry, the new rows are appended to that existing transaction instead of creating a second transaction.
 - Already-created Landed Cost rows are skipped for line creation and protected from duplicate processing using processing status and created transaction ID.
 - Created Vendor Bill or Journal Entry is stored back on each processed Landed Cost row in the visible `Created Transaction` field and hidden internal ID field.

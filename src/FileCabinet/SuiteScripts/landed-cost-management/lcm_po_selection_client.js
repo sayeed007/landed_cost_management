@@ -9,7 +9,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   url,
   config
 ) => {
-  const { FIELDS, SUBLISTS, SCRIPTS } = config;
+  const { FIELDS, SUBLISTS, SCRIPTS, LC_COST_PROFILES } = config;
   let syncing = false;
 
   function normalizeIds(value) {
@@ -24,17 +24,15 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   function fieldChanged(context) {
     if (syncing) return;
 
-    if (
-      isLandedCostField(context, FIELDS.lcmLandedCosts.vendor)
-    ) {
-      syncVendorDefaults(currentRecord.get(), context.sublistId);
+    if (!context.sublistId && context.fieldId === FIELDS.landedCostManagement.vendor) {
+      syncHeaderVendorDefaults(currentRecord.get());
       return;
     }
 
     if (
-      isLandedCostField(context, FIELDS.lcmLandedCosts.costCategory)
+      isLandedCostField(context, FIELDS.lcmLandedCosts.costProfile)
     ) {
-      syncAllocationMethodDefault(currentRecord.get(), context.sublistId);
+      syncCostProfileDefaults(currentRecord.get(), context.sublistId);
       return;
     }
 
@@ -55,22 +53,58 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     return (context.sublistId === SUBLISTS.lcmLandedCosts || !context.sublistId) && context.fieldId === fieldId;
   }
 
-  function syncVendorDefaults(rec, contextSublistId) {
-    const sublistId = getLandedCostSublistId(contextSublistId);
-    const vendorId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.vendor);
+  function syncHeaderVendorDefaults(rec) {
+    const vendorId = safeGetValue(rec, FIELDS.landedCostManagement.vendor);
     if (!vendorId) return;
 
     try {
       const defaults = fetchVendorBillDefaults(vendorId);
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
+      applyDefault(rec, '', FIELDS.landedCostManagement.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
+      rec.setValue({
+        fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders,
+        value: [],
+        ignoreFieldChange: true,
+      });
+      clearItemSublist(rec);
+    } catch (error) {
+      log.audit({
+        title: 'LCM header vendor defaults were not sourced',
+        details: error.message || error,
+      });
+    }
+  }
+
+  function syncCostProfileDefaults(rec, contextSublistId) {
+    const sublistId = getLandedCostSublistId(contextSublistId);
+    const mapping = findCostProfileMapping(
+      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile),
+      getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.costProfile)
+    );
+
+    if (!mapping) return;
+
+    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, mapping.costCategoryId, mapping.costCategoryText);
+    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, mapping.billItemId, mapping.billItemText);
+    copyHeaderDefaultsToLandedCostLine(rec, sublistId);
+    syncAllocationMethodDefault(rec, contextSublistId);
+  }
+
+  function copyHeaderDefaultsToLandedCostLine(rec, sublistId) {
+    const vendorId = safeGetValue(rec, FIELDS.landedCostManagement.vendor);
+    const subsidiaryId = safeGetValue(rec, FIELDS.landedCostManagement.subsidiary);
+    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.vendor, vendorId);
+    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary, subsidiaryId);
+    if (!vendorId) return;
+
+    try {
+      const defaults = fetchVendorBillDefaults(vendorId);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.currency, defaults.currency, defaults.currencyText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.exchangeRate, defaults.exchangeRate);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billType, defaults.billType, defaults.billTypeText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
-      syncAllocationMethodDefault(rec, contextSublistId);
     } catch (error) {
       log.audit({
-        title: 'LCM vendor defaults were not sourced',
+        title: 'LCM landed cost row vendor defaults were not sourced',
         details: error.message || error,
       });
     }
@@ -101,6 +135,24 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       return rec.getCurrentSublistValue({ sublistId, fieldId });
     }
     return rec.getValue({ fieldId });
+  }
+
+  function getLandedCostText(rec, sublistId, fieldId) {
+    if (sublistId) {
+      return rec.getCurrentSublistText({ sublistId, fieldId });
+    }
+    return rec.getText({ fieldId });
+  }
+
+  function findCostProfileMapping(profileValue, profileText) {
+    const normalizedText = normalizeChoice(profileText);
+    const normalizedValue = normalizeChoice(profileValue);
+    for (let index = 0; index < LC_COST_PROFILES.length; index += 1) {
+      const mapping = LC_COST_PROFILES[index];
+      if (normalizeChoice(mapping.profileText) === normalizedText) return mapping;
+      if (mapping.profileValue && normalizeChoice(mapping.profileValue) === normalizedValue) return mapping;
+    }
+    return null;
   }
 
   function fetchVendorBillDefaults(vendorId) {
@@ -173,17 +225,21 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     const selectedPoIds = normalizeIds(
       rec.getValue({ fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders })
     );
-    const poLines = selectedPoIds.length ? fetchPoLines(selectedPoIds) : [];
+    const vendorId = safeGetValue(rec, FIELDS.landedCostManagement.vendor);
+    if (selectedPoIds.length && !vendorId) {
+      throw new Error('Select Vendor before selecting Purchase Orders.');
+    }
+    const poLines = selectedPoIds.length ? fetchPoLines(selectedPoIds, vendorId) : [];
 
     clearItemSublist(rec);
     poLines.forEach((poLine) => addItemLine(rec, poLine));
   }
 
-  function fetchPoLines(poIds) {
+  function fetchPoLines(poIds, vendorId) {
     const suiteletUrl = url.resolveScript({
       scriptId: SCRIPTS.poLinesSuitelet.scriptId,
       deploymentId: SCRIPTS.poLinesSuitelet.deploymentId,
-      params: { poIds: poIds.join(',') },
+      params: { poIds: poIds.join(','), vendorId: vendorId || '' },
     });
     const response = https.get({ url: suiteletUrl });
     const payload = JSON.parse(response.body || '{}');
@@ -234,6 +290,14 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       ignoreFieldChange: true,
       forceSyncSourcing: true,
     });
+  }
+
+  function safeGetValue(rec, fieldId) {
+    try {
+      return rec.getValue({ fieldId });
+    } catch (error) {
+      return '';
+    }
   }
 
   function applyDefault(rec, sublistId, fieldId, value, text) {
@@ -315,6 +379,12 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
         details: error.message || error,
       });
     }
+  }
+
+  function normalizeChoice(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
   }
 
   return { fieldChanged, openLcmAccountingPreview, selectAllLcmTrackItems };

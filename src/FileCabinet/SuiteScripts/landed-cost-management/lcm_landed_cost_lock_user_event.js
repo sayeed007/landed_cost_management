@@ -2,8 +2,14 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/format', './lcm_po_selection_config', './lcm_accounting_lib'], (error, format, config, accounting) => {
-  const { FIELDS } = config;
+define(['N/error', 'N/format', 'N/record', './lcm_po_selection_config', './lcm_accounting_lib'], (
+  error,
+  format,
+  record,
+  config,
+  accounting
+) => {
+  const { FIELDS, RECORDS, LC_COST_PROFILES } = config;
 
   function beforeSubmit(context) {
     const f = FIELDS.lcmLandedCosts;
@@ -45,6 +51,10 @@ define(['N/error', 'N/format', './lcm_po_selection_config', './lcm_accounting_li
     if (!rec.getValue({ fieldId: f.createdDate })) {
       rec.setText({ fieldId: f.createdDate, text: todayDateText() });
     }
+    const parentDefaults = getParentDefaults(rec);
+    setValueIfPresent(rec, f.vendor, parentDefaults.vendor);
+    setValueIfPresent(rec, f.subsidiary, parentDefaults.subsidiary);
+    sourceCostProfileRefs(rec);
     sourceAllocationMethodDefault(rec);
 
     const vendorId = rec.getValue({ fieldId: f.vendor });
@@ -56,6 +66,50 @@ define(['N/error', 'N/format', './lcm_po_selection_config', './lcm_accounting_li
     setDefaultIfBlank(rec, f.exchangeRate, defaults.exchangeRate);
     setDefaultIfBlank(rec, f.billType, defaults.billType, defaults.billTypeText);
     setDefaultIfBlank(rec, f.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
+  }
+
+  function getParentDefaults(rec) {
+    const parentId = rec.getValue({ fieldId: FIELDS.lcmLandedCosts.parent });
+    if (!parentId) return {};
+
+    try {
+      const parent = record.load({
+        type: RECORDS.landedCostManagement,
+        id: parentId,
+        isDynamic: false,
+      });
+      return {
+        vendor: parent.getValue({ fieldId: FIELDS.landedCostManagement.vendor }),
+        subsidiary: parent.getValue({ fieldId: FIELDS.landedCostManagement.subsidiary }),
+      };
+    } catch (loadError) {
+      return {};
+    }
+  }
+
+  function sourceCostProfileRefs(rec) {
+    const f = FIELDS.lcmLandedCosts;
+    const mapping = findCostProfileMapping(
+      rec.getValue({ fieldId: f.costProfile }),
+      getTextIfPresent(rec, f.costProfile)
+    );
+    if (!mapping) return;
+
+    setValueOrText(rec, f.costCategory, mapping.costCategoryId, mapping.costCategoryText);
+    setValueOrText(rec, f.billItem, mapping.billItemId, mapping.billItemText);
+  }
+
+  function findCostProfileMapping(profileValue, profileText) {
+    const normalizedText = normalize(profileText).replace(/[^a-z0-9]/g, '');
+    const normalizedValue = normalize(profileValue).replace(/[^a-z0-9]/g, '');
+    for (let index = 0; index < LC_COST_PROFILES.length; index += 1) {
+      const mapping = LC_COST_PROFILES[index];
+      if (normalize(mapping.profileText).replace(/[^a-z0-9]/g, '') === normalizedText) return mapping;
+      if (mapping.profileValue && normalize(mapping.profileValue).replace(/[^a-z0-9]/g, '') === normalizedValue) {
+        return mapping;
+      }
+    }
+    return null;
   }
 
   function sourceAllocationMethodDefault(rec) {
@@ -91,6 +145,7 @@ define(['N/error', 'N/format', './lcm_po_selection_config', './lcm_accounting_li
       f.billType,
       f.vendor,
       f.subsidiary,
+      f.costProfile,
       f.costCategory,
       f.amount,
       f.currency,
@@ -114,7 +169,10 @@ define(['N/error', 'N/format', './lcm_po_selection_config', './lcm_accounting_li
 
   function setDefaultIfBlank(rec, fieldId, value, text) {
     if (rec.getValue({ fieldId })) return;
+    setValueOrText(rec, fieldId, value, text);
+  }
 
+  function setValueOrText(rec, fieldId, value, text) {
     if (value !== null && value !== undefined && value !== '') {
       try {
         rec.setValue({ fieldId, value });
@@ -130,6 +188,23 @@ define(['N/error', 'N/format', './lcm_po_selection_config', './lcm_accounting_li
       rec.setText({ fieldId, text });
     } catch (textError) {
       // Keep save flow moving if an account-specific default cannot be applied.
+    }
+  }
+
+  function setValueIfPresent(rec, fieldId, value) {
+    if (value === null || value === undefined || value === '') return;
+    try {
+      rec.setValue({ fieldId, value });
+    } catch (error) {
+      // Keep save flow moving if a hidden compatibility field is not exposed.
+    }
+  }
+
+  function getTextIfPresent(rec, fieldId) {
+    try {
+      return rec.getText({ fieldId }) || '';
+    } catch (error) {
+      return '';
     }
   }
 

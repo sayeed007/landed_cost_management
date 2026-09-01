@@ -16,16 +16,31 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
 
-    try {
-      const itemSublist = context.form.getSublist({ id: SUBLISTS.lcmItems });
-      const poField = itemSublist.getField({ id: FIELDS.lcmItems.purchaseOrder });
-      poField.updateDisplayType({ displayType: serverWidget.FieldDisplayType.DISABLED });
-    } catch (error) {
-      log.audit({
-        title: 'LCM line PO display was not changed',
-        details: error.message || error,
-      });
-    }
+    disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
+    disableSublistFields(context.form, SUBLISTS.lcmItems, [
+      FIELDS.lcmItems.purchaseOrder,
+      FIELDS.lcmItems.item,
+      FIELDS.lcmItems.description,
+      FIELDS.lcmItems.quantityReceipt,
+      FIELDS.lcmItems.expectedQuantityReceipt,
+      FIELDS.lcmItems.quantityRemaining,
+      FIELDS.lcmItems.quantityBill,
+      FIELDS.lcmItems.unitType,
+      FIELDS.lcmItems.poRate,
+      FIELDS.lcmItems.exchangeRate,
+      FIELDS.lcmItems.unitLandedCost,
+      FIELDS.lcmItems.totalUnitCost,
+    ]);
+    disableSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
+      FIELDS.lcmLandedCosts.billType,
+      FIELDS.lcmLandedCosts.subsidiary,
+      FIELDS.lcmLandedCosts.costCategory,
+      FIELDS.lcmLandedCosts.currency,
+      FIELDS.lcmLandedCosts.exchangeRate,
+      FIELDS.lcmLandedCosts.allocationMethod,
+      FIELDS.lcmLandedCosts.expenseAccount,
+      FIELDS.lcmLandedCosts.billItem,
+    ]);
 
     if (
       context.type === context.UserEventType.CREATE ||
@@ -55,6 +70,8 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
   function beforeSubmit(context) {
     if (context.type === context.UserEventType.DELETE) return;
+    sourceHeaderVendorDefaults(context.newRecord);
+    validateSelectedPurchaseOrders(context.newRecord);
     if (context.type === context.UserEventType.CREATE || context.type === context.UserEventType.COPY) return;
     if (!context.oldRecord || !context.newRecord.id) return;
     if (!shouldSyncPoItems(context)) return;
@@ -77,9 +94,12 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
         fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders,
       })
     );
+    const vendorId = context.newRecord.getValue({
+      fieldId: FIELDS.landedCostManagement.vendor,
+    });
 
     try {
-      const summary = lib.syncPersistedItems(parentId, selectedPoIds);
+      const summary = lib.syncPersistedItems(parentId, selectedPoIds, vendorId);
       log.audit({ title: 'LCM PO item sync complete', details: summary });
     } catch (error) {
       log.error({ title: 'LCM PO item sync failed', details: error });
@@ -93,6 +113,10 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
     }
 
     if (!context.oldRecord) return true;
+
+    const oldVendor = normalizeValue(context.oldRecord.getValue({ fieldId: FIELDS.landedCostManagement.vendor }));
+    const newVendor = normalizeValue(context.newRecord.getValue({ fieldId: FIELDS.landedCostManagement.vendor }));
+    if (oldVendor !== newVendor) return true;
 
     const oldSelected = normalizeSelection(
       context.oldRecord.getValue({
@@ -108,8 +132,75 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
     return oldSelected !== newSelected;
   }
 
+  function sourceHeaderVendorDefaults(rec) {
+    const vendorId = rec.getValue({ fieldId: FIELDS.landedCostManagement.vendor });
+    if (!vendorId) return;
+
+    const defaults = lib.getVendorDefaults(vendorId);
+    if (defaults.subsidiary) {
+      rec.setValue({
+        fieldId: FIELDS.landedCostManagement.subsidiary,
+        value: defaults.subsidiary,
+      });
+    }
+  }
+
+  function validateSelectedPurchaseOrders(rec) {
+    const vendorId = rec.getValue({ fieldId: FIELDS.landedCostManagement.vendor });
+    const selectedPoIds = lib.normalizeIds(
+      rec.getValue({ fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders })
+    );
+    if (selectedPoIds.length && !vendorId) {
+      throw error.create({
+        name: 'LCM_VENDOR_REQUIRED_FOR_PO',
+        message: 'Select Vendor before selecting Purchase Orders.',
+        notifyOff: false,
+      });
+    }
+    lib.validatePurchaseOrderVendor(selectedPoIds, vendorId);
+  }
+
   function normalizeSelection(value) {
     return lib.normalizeIds(value).sort().join(',');
+  }
+
+  function normalizeValue(value) {
+    if (Array.isArray(value)) return value.map(String).sort().join(',');
+    return String(value === null || value === undefined ? '' : value);
+  }
+
+  function disableBodyField(form, fieldId) {
+    try {
+      const field = form.getField({ id: fieldId });
+      field.updateDisplayType({ displayType: serverWidget.FieldDisplayType.DISABLED });
+    } catch (error) {
+      log.audit({
+        title: 'LCM body field display was not changed',
+        details: `${fieldId}: ${error.message || error}`,
+      });
+    }
+  }
+
+  function disableSublistFields(form, sublistId, fieldIds) {
+    try {
+      const sublist = form.getSublist({ id: sublistId });
+      fieldIds.forEach((fieldId) => {
+        try {
+          const field = sublist.getField({ id: fieldId });
+          field.updateDisplayType({ displayType: serverWidget.FieldDisplayType.DISABLED });
+        } catch (fieldError) {
+          log.audit({
+            title: 'LCM sublist field display was not changed',
+            details: `${sublistId}.${fieldId}: ${fieldError.message || fieldError}`,
+          });
+        }
+      });
+    } catch (sublistError) {
+      log.audit({
+        title: 'LCM sublist display was not changed',
+        details: `${sublistId}: ${sublistError.message || sublistError}`,
+      });
+    }
   }
 
   return { beforeLoad, beforeSubmit, afterSubmit };

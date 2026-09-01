@@ -155,9 +155,9 @@
       <defaultchecked>F</defaultchecked>
       <defaultselection></defaultselection>
       <defaultvalue></defaultvalue>
-      <description>Vendor Name</description>
+      <description>Deprecated line vendor. Scripts source this from the parent Landed Cost Management vendor.</description>
       <displayheight></displayheight>
-      <displaytype>NORMAL</displaytype>
+      <displaytype>HIDDEN</displaytype>
       <displaywidth></displaywidth>
       <dynamicdefault></dynamicdefault>
       <enabletextenhance>F</enabletextenhance>
@@ -180,7 +180,7 @@
       <searchdefault></searchdefault>
       <searchlevel>2</searchlevel>
       <selectrecordtype>-3</selectrecordtype>
-      <showinlist>T</showinlist>
+      <showinlist>F</showinlist>
       <sourcefilterby></sourcefilterby>
       <sourcefrom></sourcefrom>
       <sourcelist></sourcelist>
