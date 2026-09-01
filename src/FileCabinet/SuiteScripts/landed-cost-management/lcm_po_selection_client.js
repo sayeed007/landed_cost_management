@@ -33,15 +33,20 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   function announceClientLoad(rec) {
     if (!DEBUG.announceClientLoad) return;
     const reachable = listReachableFields(rec);
+    const selectedCategory = getSelectedCostCategory(rec, '');
+    const message =
+      `LCM client loaded.\n` +
+      `Record type: ${safeRecordType(rec)}\n` +
+      `Profile field: ${FIELDS.lcmLandedCosts.costProfile} reachable=${reachable.profile}\n` +
+      `Cost Category field: ${FIELDS.lcmLandedCosts.costCategory} reachable=${reachable.costCategory}\n` +
+      `LC Cost Item field: ${FIELDS.lcmLandedCosts.billItem} reachable=${reachable.item}\n` +
+      `Selected source: ${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
+        ''}"`;
     log.audit({
       title: 'LCM client script loaded',
-      details:
-        `Record type: ${safeRecordType(rec)}. ` +
-        `Looking for LC Cost Profile on "${getCostProfileSourceFieldIds().join('" or "')}" and ` +
-        `LC Cost Item on "${FIELDS.lcmLandedCosts.billItem}". ` +
-        `Profile field reachable: ${reachable.profile}. Cost Category field reachable: ${reachable.costCategory}. ` +
-        `Item field reachable: ${reachable.item}.`,
+      details: message,
     });
+    if (DEBUG.traceClientEvents) window.alert(message);
     if (!reachable.profile && !reachable.costCategory) {
       window.alert(
         'LCM client script loaded, but this form has no field "' +
@@ -96,6 +101,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
   function fieldChanged(context) {
     if (syncing) return;
+    traceFieldChanged(context);
 
     if (!context.sublistId && context.fieldId === FIELDS.landedCostManagement.vendor) {
       syncHeaderVendorDefaults(currentRecord.get());
@@ -118,6 +124,21 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     } finally {
       syncing = false;
     }
+  }
+
+  function traceFieldChanged(context) {
+    if (!DEBUG.traceClientEvents) return;
+    const rec = currentRecord.get();
+    const selectedCategory = getSelectedCostCategory(rec, getLandedCostSublistId(context.sublistId));
+    const message =
+      `LCM fieldChanged fired.\n` +
+      `fieldId=${context.fieldId || '(none)'}\n` +
+      `sublistId=${context.sublistId || '(body)'}\n` +
+      `source candidates=${getCostProfileSourceFieldIds().join(', ')}\n` +
+      `selected source=${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
+        ''}"`;
+    log.audit({ title: 'LCM fieldChanged trace', details: message });
+    window.alert(message);
   }
 
   function isLandedCostField(context, fieldId) {

@@ -2,11 +2,12 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config', './lcm_accounting_lib'], (
+define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_po_selection_config', './lcm_accounting_lib'], (
   error,
   format,
   log,
   record,
+  serverWidget,
   config,
   accounting
 ) => {
@@ -15,7 +16,26 @@ define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config',
   function beforeLoad(context) {
     if (!context.form) return;
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
+    addServerDebugBanner(context);
     logFormFieldInventory(context);
+  }
+
+  function addServerDebugBanner(context) {
+    if (!config.DEBUG.showServerBanner) return;
+    try {
+      const field = context.form.addField({
+        id: 'custpage_lcm_debug_banner',
+        label: 'LCM Debug',
+        type: serverWidget.FieldType.INLINEHTML,
+      });
+      field.defaultValue =
+        '<div style="margin:8px 0;padding:8px 12px;border:1px solid #b6d7a8;background:#f3fff0;color:#274e13;font:12px Arial,sans-serif;">' +
+        'LCM debug: Landed Cost row User Event beforeLoad ran. Client script module path was attached. ' +
+        'Change LC Cost Profile and copy the LCM fieldChanged alert text.' +
+        '</div>';
+    } catch (error) {
+      log.error({ title: 'LCM debug banner failed', details: error.message || error });
+    }
   }
 
   // Answers "which field id is the visible LC Cost Item on the form actually being rendered?".

@@ -93,6 +93,10 @@ define([], () => {
     logFormFields: true,
     // Client side: announces that the client script loaded, and alerts when sourcing cannot run.
     announceClientLoad: true,
+    // Temporary browser alerts for tracing which field id NetSuite sends on fieldChanged.
+    traceClientEvents: true,
+    // Temporary visible marker proving the Landed Cost row User Event ran beforeLoad.
+    showServerBanner: true,
   };
 
   const TRANSACTION_FIELDS = {
