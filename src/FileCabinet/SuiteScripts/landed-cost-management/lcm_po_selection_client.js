@@ -37,14 +37,17 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       title: 'LCM client script loaded',
       details:
         `Record type: ${safeRecordType(rec)}. ` +
-        `Looking for LC Cost Profile on "${FIELDS.lcmLandedCosts.costProfile}" and ` +
+        `Looking for LC Cost Profile on "${getCostProfileSourceFieldIds().join('" or "')}" and ` +
         `LC Cost Item on "${FIELDS.lcmLandedCosts.billItem}". ` +
-        `Profile field reachable: ${reachable.profile}. Item field reachable: ${reachable.item}.`,
+        `Profile field reachable: ${reachable.profile}. Cost Category field reachable: ${reachable.costCategory}. ` +
+        `Item field reachable: ${reachable.item}.`,
     });
-    if (!reachable.profile) {
+    if (!reachable.profile && !reachable.costCategory) {
       window.alert(
         'LCM client script loaded, but this form has no field "' +
           FIELDS.lcmLandedCosts.costProfile +
+          '" or "' +
+          FIELDS.lcmLandedCosts.costCategory +
           '". LC Cost Item cannot be auto-filled until the field id in lcm_po_selection_config.js ' +
           'matches the form. See the LCM Landed Cost form field inventory entry in the script ' +
           'execution log for the real field ids.'
@@ -55,16 +58,22 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   function listReachableFields(rec) {
     return {
       profile: fieldExists(rec, FIELDS.lcmLandedCosts.costProfile),
+      costCategory: fieldExists(rec, FIELDS.lcmLandedCosts.costCategory),
       item: fieldExists(rec, FIELDS.lcmLandedCosts.billItem),
     };
   }
 
   function fieldExists(rec, fieldId) {
     try {
-      const fieldIds = rec.getFields() || [];
-      return fieldIds.indexOf(fieldId) >= 0;
+      rec.getField({ fieldId });
+      return true;
     } catch (error) {
-      return false;
+      try {
+        rec.getValue({ fieldId });
+        return true;
+      } catch (valueError) {
+        return false;
+      }
     }
   }
 
@@ -93,9 +102,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       return;
     }
 
-    if (
-      isLandedCostField(context, FIELDS.lcmLandedCosts.costProfile)
-    ) {
+    if (isLandedCostField(context, getCostProfileSourceFieldIds())) {
       syncCostProfileDefaults(currentRecord.get(), context.sublistId);
       return;
     }
@@ -114,7 +121,8 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   }
 
   function isLandedCostField(context, fieldId) {
-    return (context.sublistId === SUBLISTS.lcmLandedCosts || !context.sublistId) && context.fieldId === fieldId;
+    const fieldIds = Array.isArray(fieldId) ? fieldId : [fieldId];
+    return (context.sublistId === SUBLISTS.lcmLandedCosts || !context.sublistId) && fieldIds.indexOf(context.fieldId) >= 0;
   }
 
   function syncHeaderVendorDefaults(rec) {
@@ -140,15 +148,16 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
   function syncCostProfileDefaults(rec, contextSublistId) {
     const sublistId = getLandedCostSublistId(contextSublistId);
-    const costCategoryId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
-    const costCategoryText = getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
+    const selectedCategory = getSelectedCostCategory(rec, sublistId);
+    const costCategoryId = selectedCategory.value;
+    const costCategoryText = selectedCategory.text;
 
     if (!costCategoryId && !costCategoryText) {
       // Reaching here on a fieldChanged for the profile field means the field id is wrong for
       // this form. Staying silent here is what made the original failure invisible.
       log.audit({
         title: 'LCM LC Cost Profile sourcing skipped',
-        details: `No value readable from "${FIELDS.lcmLandedCosts.costProfile}" (sublist "${sublistId ||
+        details: `No value readable from "${getCostProfileSourceFieldIds().join('" or "')}" (sublist "${sublistId ||
           'body'}"). Either nothing is selected, or that field id does not exist on this form.`,
       });
       return;
@@ -162,6 +171,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       log.audit({
         title: 'LCM LC Cost Profile sourcing',
         details:
+          `Source field: ${selectedCategory.fieldId || '(none)'}. ` +
           `Cost Profile internal id: ${costCategoryId || '(none)'}. ` +
           `Cost Profile text: "${costCategoryText || defaults.costCategoryText}". ` +
           `Attempted item name: "${defaults.attemptedItemName || ''}". ` +
@@ -221,7 +231,9 @@ ${defaults.reason || ''}`
 
   function syncAllocationMethodDefault(rec, contextSublistId) {
     const sublistId = getLandedCostSublistId(contextSublistId);
-    const costCategoryId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costCategory);
+    const costCategoryId =
+      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costCategory) ||
+      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
     if (!costCategoryId) return;
 
     try {
@@ -237,6 +249,22 @@ ${defaults.reason || ''}`
 
   function getLandedCostSublistId(contextSublistId) {
     return contextSublistId === SUBLISTS.lcmLandedCosts ? contextSublistId : '';
+  }
+
+  function getCostProfileSourceFieldIds() {
+    const f = FIELDS.lcmLandedCosts;
+    return [f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
+  }
+
+  function getSelectedCostCategory(rec, sublistId) {
+    const fieldIds = getCostProfileSourceFieldIds();
+    for (let index = 0; index < fieldIds.length; index += 1) {
+      const fieldId = fieldIds[index];
+      const value = getLandedCostValue(rec, sublistId, fieldId);
+      const text = getLandedCostText(rec, sublistId, fieldId);
+      if (value || text) return { fieldId, value, text };
+    }
+    return { fieldId: '', value: '', text: '' };
   }
 
   function getLandedCostValue(rec, sublistId, fieldId) {

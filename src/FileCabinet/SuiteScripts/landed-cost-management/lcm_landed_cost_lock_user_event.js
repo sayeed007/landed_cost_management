@@ -150,13 +150,14 @@ define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config',
   // mirrors this so the user sees the value before saving.
   function sourceCostProfileRefs(rec) {
     const f = FIELDS.lcmLandedCosts;
-    const profileId = rec.getValue({ fieldId: f.costProfile });
-    const profileText = getTextIfPresent(rec, f.costProfile);
+    const selectedCategory = getSelectedCostCategory(rec);
+    const profileId = selectedCategory.value;
+    const profileText = selectedCategory.text;
 
     if (!profileId && !profileText) {
       log.audit({
         title: 'LCM LC Cost Profile sourcing skipped',
-        details: `No value on ${f.costProfile}. Nothing to resolve an LC Cost Item from.`,
+        details: `No value on ${getCostProfileSourceFieldIds().join(' or ')}. Nothing to resolve an LC Cost Item from.`,
       });
       return;
     }
@@ -164,13 +165,16 @@ define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config',
     const defaults = accounting.getCostProfileDefaults(profileId, profileText);
     if (!defaults.costCategory && !defaults.costCategoryText) return;
 
-    const categorySet = setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
+    const categorySet =
+      selectedCategory.fieldId === f.costCategory ||
+      setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
     const itemSet = setValueOrText(rec, f.billItem, defaults.billItem, defaults.billItemText);
 
     if (!itemSet) {
       log.error({
         title: 'LCM LC Cost Item was not written to the record',
         details:
+          `Source field: ${selectedCategory.fieldId || '(none)'}. ` +
           `Cost Profile internal id: ${profileId || '(none)'}. Cost Profile text: "${profileText ||
             defaults.costCategoryText}". Attempted item name: "${defaults.attemptedItemName || ''}". ` +
           `Resolved item: ${defaults.billItem || '(none)'}. Target field: ${f.billItem}. ` +
@@ -185,7 +189,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config',
 
     log.audit({
       title: 'LCM LC Cost Item sourced',
-      details: `${f.costProfile}=${profileId} ("${defaults.costCategoryText}") -> ${f.billItem}=${
+      details: `${selectedCategory.fieldId}=${profileId} ("${defaults.costCategoryText}") -> ${f.billItem}=${
         defaults.billItem
       } ("${defaults.billItemText}"). Cost Category written: ${categorySet}.`,
     });
@@ -195,7 +199,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config',
     const f = FIELDS.lcmLandedCosts;
     if (rec.getValue({ fieldId: f.allocationMethod })) return;
 
-    const costCategoryId = rec.getValue({ fieldId: f.costCategory });
+    const costCategoryId = getValueIfPresent(rec, f.costCategory) || getValueIfPresent(rec, f.costProfile);
     if (!costCategoryId) return;
 
     const defaults = accounting.getAllocationMethodDefault(costCategoryId);
@@ -278,6 +282,30 @@ define(['N/error', 'N/format', 'N/log', 'N/record', './lcm_po_selection_config',
       rec.setValue({ fieldId, value });
     } catch (error) {
       // Keep save flow moving if a hidden compatibility field is not exposed.
+    }
+  }
+
+  function getCostProfileSourceFieldIds() {
+    const f = FIELDS.lcmLandedCosts;
+    return [f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
+  }
+
+  function getSelectedCostCategory(rec) {
+    const fieldIds = getCostProfileSourceFieldIds();
+    for (let index = 0; index < fieldIds.length; index += 1) {
+      const fieldId = fieldIds[index];
+      const value = getValueIfPresent(rec, fieldId);
+      const text = getTextIfPresent(rec, fieldId);
+      if (value || text) return { fieldId, value, text };
+    }
+    return { fieldId: '', value: '', text: '' };
+  }
+
+  function getValueIfPresent(rec, fieldId) {
+    try {
+      return rec.getValue({ fieldId }) || '';
+    } catch (error) {
+      return '';
     }
   }
 
