@@ -51,7 +51,7 @@ define([], () => {
       effectiveDate: 'custrecord_lcm_lcm_effective_date',
       allocationMethod: 'custrecord_lcm_lcm_allo_method',
       expenseAccount: 'custrecord_lcm_lcm_expense_account',
-      billItem: 'custrecord_lcm_lcm_bill_item',
+      billItem: 'custrecord_lcm_lcm_cost_item',
       debitAccount: 'custrecord_lcm_lcm_debit_account',
       creditAccount: 'custrecord_lcm_lcm_credit_account',
       department: 'custrecord_lcm_lcm_department',

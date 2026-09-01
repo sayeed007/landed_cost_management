@@ -108,7 +108,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Effective Date | `custrecord_lcm_lcm_effective_date` | Date | Effective date for landed-cost allocation/accounting. |
 | Allocation Method | `custrecord_lcm_lcm_allo_method` | Select, `customlist_lcm_allocation_method` | Allocation method for distributing landed cost to checked item rows. Defaults to `Value`; generated Vendor Bills copy it to `Landed Cost > Cost Allocation Method`. |
 | Expense Account | `custrecord_lcm_lcm_expense_account` | Select, Account (`-112`) | Account used when a Bill row creates an Expense line. Sourced from selected vendor when possible. |
-| Bill Item | `custrecord_lcm_lcm_bill_item` | Hidden select, Item (`-10`) | Hidden native item used when a Bill row creates an Item line; sourced from LC Cost Profile. |
+| LC Cost Item | `custrecord_lcm_lcm_cost_item` | Select, Item (`-10`) | Item used when a Bill row creates an Item line; sourced from LC Cost Profile. |
 | Debit Account | `custrecord_lcm_lcm_debit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constants. |
 | Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constants. |
 | Department | `custrecord_lcm_lcm_department` | Select, Department (`-102`) | Optional accounting classification copied to generated transaction lines. |

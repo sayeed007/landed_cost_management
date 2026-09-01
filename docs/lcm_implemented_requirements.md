@@ -172,7 +172,7 @@ Allocation behavior:
 
 Selecting `LC Cost Profile` (`custrecord_lcm_lcm_cost_profile`, native Landed Cost Category list `-155`) sources the hidden references behind it.
 
-- `LC Cost Item` (`custrecord_lcm_lcm_bill_item`, Item `-10`) is matched to an **active** item whose Name/Number (`itemid`) or Display Name (`displayname`) equals the profile text exactly. Example: profile `LC Advanced Income Tax` resolves to item `1933`.
+- `LC Cost Item` (`custrecord_lcm_lcm_cost_item`, Item `-10`) is matched to an **active** item whose Name/Number (`itemid`) or Display Name (`displayname`) equals the profile text exactly. Example: profile `LC Advanced Income Tax` resolves to item `1933`.
 - `Cost Category` (`custrecord_lcm_lcm_cost_category`) stores the selected category so generated Vendor Bills can tag the item line.
 - Item search filters on `itemid` then `displayname`. `name` is **not** a searchable field on an item search and raised `invalid field: name` on every lookup; it has been removed.
 - A subitem's `itemid` includes its parent (`Parent : Child`), so a subitem will not match on Name/Number. Give it a Display Name equal to the profile text, or use a top-level item.
