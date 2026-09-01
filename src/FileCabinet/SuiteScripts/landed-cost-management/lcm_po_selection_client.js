@@ -30,6 +30,13 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
   // N/log in a client script writes to the BROWSER CONSOLE, not the NetSuite execution log.
   // Open devtools to read these; the execution log only carries the server-side entries.
+  function traceClient(title, details) {
+    if (!DEBUG.traceClientEvents) return;
+    const message = details ? `${title}\n${details}` : title;
+    log.audit({ title, details: message });
+    window.alert(message);
+  }
+
   function announceClientLoad(rec) {
     if (!DEBUG.announceClientLoad) return;
     const reachable = listReachableFields(rec);
@@ -42,11 +49,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       `LC Cost Item field: ${FIELDS.lcmLandedCosts.billItem} reachable=${reachable.item}\n` +
       `Selected source: ${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
         ''}"`;
-    log.audit({
-      title: 'LCM client script loaded',
-      details: message,
-    });
-    if (DEBUG.traceClientEvents) window.alert(message);
+    traceClient('LCM client script loaded', message);
     if (!reachable.profile && !reachable.costCategory) {
       window.alert(
         'LCM client script loaded, but this form has no field "' +
@@ -137,8 +140,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       `source candidates=${getCostProfileSourceFieldIds().join(', ')}\n` +
       `selected source=${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
         ''}"`;
-    log.audit({ title: 'LCM fieldChanged trace', details: message });
-    window.alert(message);
+    traceClient('LCM fieldChanged trace', message);
   }
 
   function isLandedCostField(context, fieldId) {
@@ -185,9 +187,31 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     }
 
     try {
+      traceClient(
+        'LCM LC Cost Profile matched',
+        `Starting lookup.\n` +
+          `sublistId=${sublistId || '(body)'}\n` +
+          `source field=${selectedCategory.fieldId || '(none)'}\n` +
+          `selected value=${costCategoryId || '(blank)'}\n` +
+          `selected text="${costCategoryText || ''}"\n` +
+          `target item field=${FIELDS.lcmLandedCosts.billItem}\n` +
+          `available current sublist fields=${getSublistFieldIds(rec, sublistId).join(', ') || '(none)'}`
+      );
       const defaults = fetchCostProfileDefaults(costCategoryId, costCategoryText);
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
+      traceClient(
+        'LCM LC Cost Profile lookup returned',
+        `costCategory=${defaults.costCategory || '(blank)'}\n` +
+          `costCategoryText="${defaults.costCategoryText || ''}"\n` +
+          `attemptedItemName="${defaults.attemptedItemName || ''}"\n` +
+          `billItem=${defaults.billItem || '(blank)'}\n` +
+          `billItemText="${defaults.billItemText || ''}"\n` +
+          `matched=${Boolean(defaults.matched)}\n` +
+          `reason=${defaults.reason || '(none)'}`
+      );
+      const categorySet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
       const itemSet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
+      const writtenItem = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.billItem);
+      const writtenItemText = getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.billItem);
 
       log.audit({
         title: 'LCM LC Cost Profile sourcing',
@@ -199,6 +223,16 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
           `Resolved item: ${defaults.billItem || '(none)'}. Written to form: ${itemSet}. ` +
           `Reason: ${defaults.reason || '(none)'}`,
       });
+
+      traceClient(
+        'LCM LC Cost Item write result',
+        `costCategorySet=${categorySet}\n` +
+          `itemSet=${itemSet}\n` +
+          `target field=${FIELDS.lcmLandedCosts.billItem}\n` +
+          `current target value=${writtenItem || '(blank)'}\n` +
+          `current target text="${writtenItemText || ''}"\n` +
+          `expected item=${defaults.billItem || '(blank)'} "${defaults.billItemText || ''}"`
+      );
 
       if (!itemSet) {
         window.alert(
@@ -337,10 +371,31 @@ ${defaults.reason || ''}`
         costCategoryText: costCategoryText || '',
       },
     });
+    traceClient(
+      'LCM calling costProfileDefaults Suitelet',
+      `action=costProfileDefaults\n` +
+        `costCategoryId=${costCategoryId || '(blank)'}\n` +
+        `costCategoryText="${costCategoryText || ''}"\n` +
+        `url=${suiteletUrl}`
+    );
     const response = https.get({ url: suiteletUrl });
+    traceClient(
+      'LCM costProfileDefaults Suitelet responded',
+      `response code=${response.code || '(none)'}\n` +
+        `response body=${String(response.body || '').slice(0, 900)}`
+    );
     const payload = JSON.parse(response.body || '{}');
     if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Profile defaults.');
     return payload.defaults || {};
+  }
+
+  function getSublistFieldIds(rec, sublistId) {
+    if (!sublistId) return [];
+    try {
+      return rec.getSublistFields({ sublistId }) || [];
+    } catch (error) {
+      return [`unavailable: ${error.message || error}`];
+    }
   }
 
   function fetchAllocationMethodDefault(costCategoryId) {
