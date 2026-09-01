@@ -16,6 +16,7 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
 
+    orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
     disableSublistFields(context.form, SUBLISTS.lcmItems, [
       FIELDS.lcmItems.purchaseOrder,
@@ -167,6 +168,25 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
   function normalizeValue(value) {
     if (Array.isArray(value)) return value.map(String).sort().join(',');
     return String(value === null || value === undefined ? '' : value);
+  }
+
+  function orderHeaderFields(form) {
+    const f = FIELDS.landedCostManagement;
+    moveBodyFieldBefore(form, f.selectedPurchaseOrders, f.shipmentNumber);
+    moveBodyFieldBefore(form, f.subsidiary, f.selectedPurchaseOrders);
+    moveBodyFieldBefore(form, f.vendor, f.subsidiary);
+  }
+
+  function moveBodyFieldBefore(form, fieldId, nextFieldId) {
+    try {
+      const field = form.getField({ id: fieldId });
+      form.insertField({ field, nextfield: nextFieldId });
+    } catch (error) {
+      log.audit({
+        title: 'LCM body field order was not changed',
+        details: `${fieldId} before ${nextFieldId}: ${error.message || error}`,
+      });
+    }
   }
 
   function disableBodyField(form, fieldId) {

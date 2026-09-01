@@ -14,6 +14,7 @@ define([], () => {
       vendor: 'custrecord_lcm_vendor',
       subsidiary: 'custrecord_lcm_subsidiary',
       selectedPurchaseOrders: 'custrecord_lcm_selected_pos',
+      shipmentNumber: 'custrecord_lcm_shipment_number',
     },
     lcmItems: {
       parent: 'custrecord_lcm_lcm_hidden_lcm_item',
