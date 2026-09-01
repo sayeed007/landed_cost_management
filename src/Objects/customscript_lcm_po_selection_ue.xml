@@ -1,0 +1,17 @@
+<usereventscript scriptid="customscript_lcm_po_selection_ue">
+    <name>LCM PO Selection User Event</name>
+    <scriptfile>[/SuiteScripts/landed-cost-management/lcm_po_selection_user_event.js]</scriptfile>
+    <isinactive>F</isinactive>
+    <notifyadmins>F</notifyadmins>
+    <notifyowner>F</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_lcm_po_selection_ue">
+            <status>RELEASED</status>
+            <recordtype>[customrecord_landed_cost_management]</recordtype>
+            <isdeployed>T</isdeployed>
+            <loglevel>AUDIT</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</usereventscript>

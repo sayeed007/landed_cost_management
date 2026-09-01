@@ -1,0 +1,12 @@
+{
+  "name": "landed-cost-management",
+  "private": true,
+  "scripts": {
+    "validate": "suitecloud project:validate",
+    "deploy": "suitecloud project:deploy",
+    "preview": "suitecloud project:deploy --dryrun"
+  },
+  "devDependencies": {
+    "@oracle/suitecloud-cli": "4.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+<usereventscript scriptid="customscript_lcm_landed_cost_lock_ue">
+    <name>LCM Landed Cost Row Lock</name>
+    <scriptfile>[/SuiteScripts/landed-cost-management/lcm_landed_cost_lock_user_event.js]</scriptfile>
+    <isinactive>F</isinactive>
+    <notifyadmins>F</notifyadmins>
+    <notifyowner>F</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_lcm_landed_cost_lock_ue">
+            <status>RELEASED</status>
+            <recordtype>[customrecord_lcm_landed_cost]</recordtype>
+            <isdeployed>T</isdeployed>
+            <loglevel>AUDIT</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</usereventscript>

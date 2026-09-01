@@ -1,0 +1,28 @@
+<manifest projecttype="ACCOUNTCUSTOMIZATION">
+  <projectname>landed_cost_management</projectname>
+  <frameworkversion>1.0</frameworkversion>
+  <dependencies>
+    <features>
+      <feature required="true">CUSTOMRECORDS</feature>
+      <feature required="true">SERVERSIDESCRIPTING</feature>
+      <feature required="true">UNITSOFMEASURE</feature>
+      <feature required="false">MULTILANGUAGE</feature>
+      <feature required="true">ACCOUNTING</feature>
+      <feature required="false">CUSTOMSEGMENTS</feature>
+      <feature required="true">PURCHASEORDERS</feature>
+      <feature required="false">EXTREMELIST</feature>
+      <feature required="false">MAILMERGE</feature>
+      <feature required="true">SUBSIDIARIES</feature>
+    </features>
+    <objects>
+      <object>customrecord_landed_cost_management</object>
+      <object>customlist_lc_type</object>
+      <object>customrecord_lcmitems</object>
+      <object>customrecord_lcm_landed_cost</object>
+      <object>customlist_bill_type</object>
+      <object>custbody12</object>
+      <object>customlist_wmsse_ports</object>
+      <object>customlist_lc_status</object>
+    </objects>
+  </dependencies>
+</manifest>

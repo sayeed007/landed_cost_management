@@ -1,0 +1,20 @@
+<customlist scriptid="customlist_lcm_allocation_method">
+  <description>Allocation method for distributing landed cost to checked LCM Item rows.</description>
+  <isinactive>F</isinactive>
+  <isordered>T</isordered>
+  <name>LCM Allocation Method</name>
+  <customvalues>
+    <customvalue scriptid="val_lcm_alloc_equal">
+      <isinactive>F</isinactive>
+      <value>Equal</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_alloc_quantity">
+      <isinactive>F</isinactive>
+      <value>Quantity</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_alloc_amount">
+      <isinactive>F</isinactive>
+      <value>Value</value>
+    </customvalue>
+  </customvalues>
+</customlist>

@@ -1,0 +1,19 @@
+<customlist scriptid="customlist_lcm_bill_line_type">
+  <description>Vendor Bill line tab for Landed Cost bill rows.</description>
+  <isinactive>F</isinactive>
+  <ismatrixoption>F</ismatrixoption>
+  <isordered>T</isordered>
+  <name>LCM Bill Line Type</name>
+  <customvalues>
+    <customvalue scriptid="val_lcm_bill_line_expense">
+      <abbreviation>EXP</abbreviation>
+      <isinactive>F</isinactive>
+      <value>Expense</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_bill_line_item">
+      <abbreviation>ITEM</abbreviation>
+      <isinactive>F</isinactive>
+      <value>Item</value>
+    </customvalue>
+  </customvalues>
+</customlist>

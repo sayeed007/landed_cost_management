@@ -1,0 +1,17 @@
+<suitelet scriptid="customscript_lcm_po_lines_sl">
+    <name>LCM PO Lines Suitelet</name>
+    <scriptfile>[/SuiteScripts/landed-cost-management/lcm_po_lines_suitelet.js]</scriptfile>
+    <isinactive>F</isinactive>
+    <notifyadmins>F</notifyadmins>
+    <notifyowner>F</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_lcm_po_lines_sl">
+            <title>LCM PO Lines Suitelet</title>
+            <status>RELEASED</status>
+            <isdeployed>T</isdeployed>
+            <loglevel>AUDIT</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</suitelet>

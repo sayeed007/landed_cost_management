@@ -1,0 +1,19 @@
+<customlist scriptid="customlist_lcm_acct_target_type">
+  <description>Accounting output target for Landed Cost rows.</description>
+  <isinactive>F</isinactive>
+  <ismatrixoption>F</ismatrixoption>
+  <isordered>T</isordered>
+  <name>LCM Accounting Target Type</name>
+  <customvalues>
+    <customvalue scriptid="val_lcm_target_bill">
+      <abbreviation>BILL</abbreviation>
+      <isinactive>F</isinactive>
+      <value>Bill</value>
+    </customvalue>
+    <customvalue scriptid="val_lcm_target_ledger">
+      <abbreviation>JOURNAL</abbreviation>
+      <isinactive>F</isinactive>
+      <value>Journal</value>
+    </customvalue>
+  </customvalues>
+</customlist>

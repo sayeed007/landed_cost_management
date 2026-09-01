@@ -1,0 +1,17 @@
+<suitelet scriptid="customscript_lcm_accounting_sl">
+    <name>LCM Accounting Preview and Create</name>
+    <scriptfile>[/SuiteScripts/landed-cost-management/lcm_accounting_suitelet.js]</scriptfile>
+    <isinactive>F</isinactive>
+    <notifyadmins>F</notifyadmins>
+    <notifyowner>F</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_lcm_accounting_sl">
+            <title>LCM Accounting Preview and Create</title>
+            <status>RELEASED</status>
+            <isdeployed>T</isdeployed>
+            <loglevel>AUDIT</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</suitelet>
