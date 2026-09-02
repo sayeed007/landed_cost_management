@@ -97,7 +97,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | --- | --- | --- | --- |
 | Target Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Select, `customlist_lcm_bill_line_type` | Chooses whether a Bill row creates an Expense line or Item line. |
-| Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Hidden select, `customlist_bill_type` | Existing Vendor Bill body Bill Type source. Set on generated Vendor Bills as `custbody12`. Values include Regular Bill and LC Bill. |
+| Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Select, `customlist_bill_type` | User-selectable Vendor Bill body Bill Type source. Set on generated Vendor Bills as `custbody12`. Values include Regular Bill and LC Bill. |
 | Vendor | `custrecord_lcm_lcm_vendor` | Hidden select, Vendor (`-3`) | Compatibility/reference field sourced from parent Vendor. Users do not edit Vendor per Landed Cost row. |
 | Subsidiary | `custrecord_lcm_lcm_subsidiary` | Hidden select, Subsidiary (`-117`) | Reference field sourced from parent Vendor/parent Subsidiary for generated Vendor Bills and Journal Entries. |
 | LC Cost Profile | `custrecord_lcm_lcm_cost_profile` | Select, `customlist_lcm_cost_profile` | Visible LC-specific selector. Scripts map each value to hidden native Cost Category and Bill Item references. |

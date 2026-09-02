@@ -19,7 +19,6 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
     orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
     hideSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
-      FIELDS.lcmLandedCosts.billType,
       FIELDS.lcmLandedCosts.vendor,
       FIELDS.lcmLandedCosts.subsidiary,
       FIELDS.lcmLandedCosts.expenseAccount,

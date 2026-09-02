@@ -133,7 +133,7 @@ Landed Cost rows now drive accounting creation from the `Landed Cost` child subl
 
 Implemented behavior:
 
-- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, hidden Bill Type, LC Cost Profile, hidden vendor/subsidiary/native cost references, currency, Bill line type, hidden expense details, classifications, memo, processing status, and created transaction references.
+- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, selectable Bill Type, LC Cost Profile, hidden vendor/subsidiary/native cost references, currency, Bill line type, hidden expense details, classifications, memo, processing status, and created transaction references.
 - Added root record buttons on saved/viewed LCM records:
   - `Create Bill`
   - `Create Journal`

@@ -17,7 +17,6 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     if (!context.form) return;
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
     hideBodyFields(context.form, [
-      FIELDS.lcmLandedCosts.billType,
       FIELDS.lcmLandedCosts.vendor,
       FIELDS.lcmLandedCosts.subsidiary,
       FIELDS.lcmLandedCosts.expenseAccount,
