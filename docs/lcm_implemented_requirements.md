@@ -149,7 +149,7 @@ Implemented behavior:
   - `Bill Line Type` is `Item`. NetSuite `expense` lines cannot carry a Landed Cost Category.
   - `Bill Item` is a non-inventory/service/other-charge item. Inventory items are allocation targets, not cost carriers.
   - `Cost Category` is a Cost Category whose type is `Landed Cost`, and the `Landed Cost` feature is enabled at Setup > Company > Enable Features > Items & Inventory.
-- `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from fixed account constants in `lcm_po_selection_config.js`. Current temporary constants are debit account `1` and credit account `2`; replace them with approved LCM posting accounts before production Journal use.
+- `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from fixed account constants in `lcm_po_selection_config.js`. Current temporary constants are debit account `1` and credit account `2`; if either account is rejected by NetSuite, the script falls back through active account candidates and uses the first account accepted by the Journal line.
 - If uncreated rows match a group that already has a created Vendor Bill or Journal Entry, the new rows are appended to that existing transaction instead of creating a second transaction.
 - Already-created Landed Cost rows are skipped for line creation and protected from duplicate processing using processing status and created transaction ID.
 - Created Vendor Bill or Journal Entry is stored back on each processed Landed Cost row in the visible `Created Transaction` field and hidden internal ID field.

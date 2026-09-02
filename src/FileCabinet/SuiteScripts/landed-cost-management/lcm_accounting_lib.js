@@ -14,6 +14,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   };
   const vendorDefaultsCache = {};
   const costProfileDefaultsCache = {};
+  const journalAccountCandidatesCache = {};
 
   function toNumber(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -994,7 +995,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function addJournalLine(journal, row, side) {
     journal.selectNewLine({ sublistId: 'line' });
-    setCurrentIfPresent(journal, 'line', 'account', side === 'debit' ? getJournalDebitAccount(row) : getJournalCreditAccount(row));
+    setJournalLineAccount(journal, row, side);
     setCurrentIfPresent(journal, 'line', side, row.amount);
     setCurrentIfPresent(journal, 'line', 'memo', row.memo || row.costCategoryText);
     setClassifications(journal, 'line', row);
@@ -1002,11 +1003,110 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function getJournalDebitAccount(row) {
-    return ACCOUNT_CONSTANTS.journalDebitAccount || row.debitAccount || '';
+    return getJournalAccountCandidates(row, 'debit')[0] || '';
   }
 
   function getJournalCreditAccount(row) {
-    return ACCOUNT_CONSTANTS.journalCreditAccount || row.creditAccount || '';
+    return getJournalAccountCandidates(row, 'credit')[0] || '';
+  }
+
+  function setJournalLineAccount(journal, row, side) {
+    const candidates = getJournalAccountCandidates(row, side);
+    const failures = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const accountId = candidates[index];
+      try {
+        journal.setCurrentSublistValue({
+          sublistId: 'line',
+          fieldId: 'account',
+          value: accountId,
+        });
+        return accountId;
+      } catch (error) {
+        failures.push(`${accountId}: ${error.message || error}`);
+      }
+    }
+
+    throw new Error(
+      `No valid Journal ${side} account was accepted for subsidiary ${row.subsidiary || '(none)'}. ` +
+        `Tried: ${failures.join(' | ') || '(none)'}`
+    );
+  }
+
+  function getJournalAccountCandidates(row, side) {
+    const configured =
+      side === 'debit' ? ACCOUNT_CONSTANTS.journalDebitAccount : ACCOUNT_CONSTANTS.journalCreditAccount;
+    const rowAccount = side === 'debit' ? row.debitAccount : row.creditAccount;
+    const autoAccounts = getAutoJournalAccountCandidates(row.subsidiary);
+    const orderedAutoAccounts = side === 'credit' ? autoAccounts.slice(1).concat(autoAccounts.slice(0, 1)) : autoAccounts;
+    return uniqueIds([configured, rowAccount].concat(orderedAutoAccounts));
+  }
+
+  function getAutoJournalAccountCandidates(subsidiaryId) {
+    const cacheKey = normalizeValue(subsidiaryId) || 'any';
+    if (journalAccountCandidatesCache[cacheKey]) return journalAccountCandidatesCache[cacheKey];
+
+    const attempts = [
+      {
+        label: 'active non-summary accounts',
+        filters: [
+          ['isinactive', 'is', 'F'],
+          'AND',
+          ['issummary', 'is', 'F'],
+        ],
+      },
+      {
+        label: 'active accounts',
+        filters: [['isinactive', 'is', 'F']],
+      },
+      {
+        label: 'any accounts',
+        filters: [],
+      },
+    ];
+
+    for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
+      const attempt = attempts[attemptIndex];
+      try {
+        const accountIds = [];
+        search
+          .create({
+            type: search.Type.ACCOUNT,
+            filters: attempt.filters,
+            columns: [search.createColumn({ name: 'internalid', sort: search.Sort.ASC })],
+          })
+          .run()
+          .each((result) => {
+            accountIds.push(String(result.getValue({ name: 'internalid' }) || ''));
+            return accountIds.length < 20;
+          });
+        const candidates = uniqueIds(accountIds);
+        if (candidates.length) {
+          journalAccountCandidatesCache[cacheKey] = candidates;
+          return candidates;
+        }
+      } catch (error) {
+        log.audit({
+          title: 'LCM Journal account auto-search failed',
+          details: `${attempt.label}: ${error.message || error}`,
+        });
+      }
+    }
+
+    journalAccountCandidatesCache[cacheKey] = [];
+    return journalAccountCandidatesCache[cacheKey];
+  }
+
+  function uniqueIds(values) {
+    const seen = {};
+    const ids = [];
+    values.forEach((value) => {
+      const id = normalizeValue(value).trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    });
+    return ids;
   }
 
   function allocateCreatedCosts(parentId, rows) {

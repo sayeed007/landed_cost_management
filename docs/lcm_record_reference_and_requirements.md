@@ -109,8 +109,8 @@ This document is the working record and field reference for the Landed Cost Mana
 | Allocation Method | `custrecord_lcm_lcm_allo_method` | Select, `customlist_lcm_allocation_method` | Allocation method for distributing landed cost to checked item rows. Defaults to `Value`; generated Vendor Bills copy it to `Landed Cost > Cost Allocation Method`. |
 | Expense Account | `custrecord_lcm_lcm_expense_account` | Hidden select, Account (`-112`) | Account used when a Bill row creates an Expense line. Sourced from selected vendor when possible. |
 | LC Cost Item | `custrecord_lcm_lcm_cost_item` | Select, Item (`-10`) | Item used when a Bill row creates an Item line; sourced from LC Cost Profile. |
-| Debit Account | `custrecord_lcm_lcm_debit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constant `journalDebitAccount`. |
-| Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constant `journalCreditAccount`. |
+| Debit Account | `custrecord_lcm_lcm_debit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows try fixed script constant `journalDebitAccount`, then active account candidates. |
+| Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows try fixed script constant `journalCreditAccount`, then active account candidates. |
 | Department | `custrecord_lcm_lcm_department` | Select, Department (`-102`) | Optional accounting classification copied to generated transaction lines. |
 | Class | `custrecord_lcm_lcm_class` | Select, Class (`-101`) | Optional accounting classification copied to generated transaction lines. |
 | Location | `custrecord_lcm_lcm_location` | Select, Location (`-103`) | Optional accounting classification copied to generated transaction lines. |
