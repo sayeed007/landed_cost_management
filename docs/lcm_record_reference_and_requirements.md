@@ -74,8 +74,8 @@ This document is the working record and field reference for the Landed Cost Mana
 | PO Currency | `custrecord_lcmitems_po_currency` | Currency | Existing field labelled PO Currency. Current scripts do not populate this with a currency record because the field type is Currency amount, not List/Record Currency. |
 | Exchange Rate | `custrecord_lcmitems_exchange_rate` | Text | Exchange rate from the PO line/header search result. |
 | PO Rate | `custrecord_lcmitems_po_rate` | Currency | PO line rate. |
-| Unit Landed Cost | `custrecord_lcmitems_unit_landed_cost` | Currency | Placeholder/result field for future landed cost per unit. Current PO-population scripts do not calculate this. |
-| Total Unit Cost | `custrecord_lcmitems_total_unit_cost` | Currency | Placeholder/result field for future total unit cost. Current PO-population scripts do not calculate this. |
+| Unit Landed Cost | `custrecord_lcmitems_unit_landed_cost` | Currency | Result field for Bill landed-cost allocation per unit. Journal Entry amounts are not included in this calculation. |
+| Total Unit Cost | `custrecord_lcmitems_total_unit_cost` | Currency | Result field for PO rate plus Bill allocated landed cost per unit. Journal Entry amounts are not included in this calculation. |
 | Hidden LCM Item | `custrecord_lcm_lcm_hidden_lcm_item` | Parent select to `customrecord_landed_cost_management` | Parent-child link back to the root Landed Cost Management record. This creates the `Items` child sublist. |
 | PO Line Key | `custrecord_lcmitems_source_line_key` | Hidden text | Internal generated key from PO ID and PO line unique key. Used as a persisted trace/debug key. Current UI refresh clears and rebuilds lines, so it is not used as the primary duplicate prevention mechanism. |
 

@@ -61,7 +61,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
     assertParentAccessible(preview.parentId);
     const rows = fetchLandedCostRows(parentId).filter((row) => row.targetMode === mode);
-    const trackedItems = fetchTrackedItems(parentId);
+    const trackedItems = mode === MODES.bill ? fetchTrackedItems(parentId) : [];
     preview.allocationTargetCount = trackedItems.length;
 
     if (!rows.length) {
@@ -91,7 +91,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       preview.eligibleRows.push(row);
     });
 
-    if (preview.eligibleRows.length && !trackedItems.length) {
+    if (mode === MODES.bill && preview.eligibleRows.length && !trackedItems.length) {
       preview.errors.push('At least one LCM Item row must have Track Item checked before creating accounting.');
     }
 
@@ -117,8 +117,10 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       createdRows.push(...group.rows);
       created.push(transaction);
     });
-    allocateCreatedCosts(parentId, createdRows);
-    markCostRowsAllocated(createdRows);
+    if (preview.mode === MODES.bill) {
+      allocateCreatedCosts(parentId, createdRows);
+      markCostRowsAllocated(createdRows);
+    }
 
     return {
       mode: preview.mode,
@@ -1110,6 +1112,9 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function allocateCreatedCosts(parentId, rows) {
+    const allocatableRows = (rows || []).filter((row) => row.targetMode === MODES.bill);
+    if (!allocatableRows.length) return;
+
     const items = fetchTrackedItems(parentId);
     if (!items.length) throw new Error('No tracked LCM Items are available for landed-cost allocation.');
 
@@ -1118,7 +1123,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       incrementsByItemId[item.id] = 0;
     });
 
-    rows.forEach((row) => {
+    allocatableRows.forEach((row) => {
       const weights = buildAllocationWeights(items, row.allocationMethodText);
       const totalWeight = weights.reduce((sum, entry) => sum + entry.weight, 0);
       if (!totalWeight) return;

@@ -153,7 +153,7 @@ Implemented behavior:
 - If uncreated rows match a group that already has a created Vendor Bill or Journal Entry, the new rows are appended to that existing transaction instead of creating a second transaction.
 - Already-created Landed Cost rows are skipped for line creation and protected from duplicate processing using processing status and created transaction ID.
 - Created Vendor Bill or Journal Entry is stored back on each processed Landed Cost row in the visible `Created Transaction` field and hidden internal ID field.
-- After successful creation, scripts allocate the created cost amount to checked `LCM Items` rows and update `Unit Landed Cost` and `Total Unit Cost`.
+- After successful Vendor Bill creation, scripts allocate the Bill landed-cost amount to checked `LCM Items` rows and update `Unit Landed Cost` and `Total Unit Cost`. Journal Entry amounts are not included in this item-cost recalculation.
 - Allocation runs once per confirmed create action across all created groups, instead of rewriting every tracked item once per group.
 - Created Landed Cost rows are locked from edits to transaction-driving fields by a child User Event.
 - Selecting a Landed Cost Category attempts to default `Allocation Method` from NetSuite landed cost category metadata, falling back to `Value` if the account-specific native field is not readable.
@@ -162,7 +162,7 @@ Implemented behavior:
 Allocation behavior:
 
 - Only `LCM Items` rows with `Track Item` checked are allocation targets.
-- If no `LCM Items` rows have `Track Item` checked, accounting creation is blocked before confirmation.
+- If no `LCM Items` rows have `Track Item` checked, Vendor Bill creation is blocked before confirmation. Journal Entry creation does not require tracked item rows because Journal amounts are not included in `Unit Landed Cost` or `Total Unit Cost`.
 - If the allocation method text contains quantity/qty, cost is allocated by quantity.
 - If the allocation method text contains amount/value/rate, cost is allocated by PO value.
 - Otherwise, cost is allocated equally across checked item rows.
