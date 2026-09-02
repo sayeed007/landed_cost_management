@@ -123,7 +123,7 @@ Open caveat:
 - PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, `Unit Landed Cost`, and `Total Unit Cost`.
 - After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values.
 - Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts source it from SDF-managed child field `custrecord_lcm_lcm_cost_bill_type`.
-- Landed Cost rows inherit Vendor and Subsidiary from the parent record. The line-level Vendor field is hidden and retained only as a compatibility/reference field.
+- Landed Cost rows inherit Vendor and Subsidiary from the parent record. The line-level Vendor and Subsidiary fields are hidden and retained only as compatibility/reference fields.
 - Users select `LC Cost Profile`; scripts map that profile to hidden native Cost Category and Bill Item references. The profile list values currently assume matching NetSuite native Cost Category and Item names such as `LC - Freight`.
 - The client and child User Event source matching available defaults: Subsidiary, Currency, Exchange Rate, Bill Type, Expense Account, Allocation Method, Cost Category, and Bill Item. Each field is applied independently so one unavailable/invalid account field does not block the remaining defaults.
 
@@ -133,7 +133,7 @@ Landed Cost rows now drive accounting creation from the `Landed Cost` child subl
 
 Implemented behavior:
 
-- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, Bill Type, LC Cost Profile, hidden vendor/subsidiary/native cost references, currency, Bill line type, expense details, classifications, memo, processing status, and created transaction references.
+- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, hidden Bill Type, LC Cost Profile, hidden vendor/subsidiary/native cost references, currency, Bill line type, hidden expense details, classifications, memo, processing status, and created transaction references.
 - Added root record buttons on saved/viewed LCM records:
   - `Create Bill`
   - `Create Journal`
@@ -149,7 +149,7 @@ Implemented behavior:
   - `Bill Line Type` is `Item`. NetSuite `expense` lines cannot carry a Landed Cost Category.
   - `Bill Item` is a non-inventory/service/other-charge item. Inventory items are allocation targets, not cost carriers.
   - `Cost Category` is a Cost Category whose type is `Landed Cost`, and the `Landed Cost` feature is enabled at Setup > Company > Enable Features > Items & Inventory.
-- `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from fixed account constants in `lcm_po_selection_config.js`. Deprecated Debit Account and Credit Account fields are hidden and used only as fallback for legacy rows until constants are configured.
+- `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from fixed account constants in `lcm_po_selection_config.js`. Current temporary constants are debit account `1` and credit account `2`; replace them with approved LCM posting accounts before production Journal use.
 - If uncreated rows match a group that already has a created Vendor Bill or Journal Entry, the new rows are appended to that existing transaction instead of creating a second transaction.
 - Already-created Landed Cost rows are skipped for line creation and protected from duplicate processing using processing status and created transaction ID.
 - Created Vendor Bill or Journal Entry is stored back on each processed Landed Cost row in the visible `Created Transaction` field and hidden internal ID field.

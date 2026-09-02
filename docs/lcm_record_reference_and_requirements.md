@@ -97,9 +97,9 @@ This document is the working record and field reference for the Landed Cost Mana
 | --- | --- | --- | --- |
 | Target Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Select, `customlist_lcm_bill_line_type` | Chooses whether a Bill row creates an Expense line or Item line. |
-| Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Select, `customlist_bill_type` | Existing Vendor Bill body Bill Type source. Set on generated Vendor Bills as `custbody12`. Values include Regular Bill and LC Bill. |
+| Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Hidden select, `customlist_bill_type` | Existing Vendor Bill body Bill Type source. Set on generated Vendor Bills as `custbody12`. Values include Regular Bill and LC Bill. |
 | Vendor | `custrecord_lcm_lcm_vendor` | Hidden select, Vendor (`-3`) | Compatibility/reference field sourced from parent Vendor. Users do not edit Vendor per Landed Cost row. |
-| Subsidiary | `custrecord_lcm_lcm_subsidiary` | Select, Subsidiary (`-117`) | Read-only form field sourced from parent Vendor/parent Subsidiary for generated Vendor Bills and Journal Entries. |
+| Subsidiary | `custrecord_lcm_lcm_subsidiary` | Hidden select, Subsidiary (`-117`) | Reference field sourced from parent Vendor/parent Subsidiary for generated Vendor Bills and Journal Entries. |
 | LC Cost Profile | `custrecord_lcm_lcm_cost_profile` | Select, `customlist_lcm_cost_profile` | Visible LC-specific selector. Scripts map each value to hidden native Cost Category and Bill Item references. |
 | Cost Category | `custrecord_lcm_lcm_cost_category` | Hidden select/list | Hidden native Cost Category for the landed-cost charge. NetSuite metadata identifies the target as internal record/list `-155`. |
 | Amount | `custrecord_lcm_lcm_amout` | Currency | Landed-cost amount. Existing field ID spelling is `amout`. |
@@ -107,10 +107,10 @@ This document is the working record and field reference for the Landed Cost Mana
 | Exchange Rate | `custrecord_lcm_lcm_exchange_rate` | Currency/number | Exchange rate for the landed-cost charge. Sourced from selected vendor through a dynamic Vendor Bill draft when possible. |
 | Effective Date | `custrecord_lcm_lcm_effective_date` | Date | Effective date for landed-cost allocation/accounting. |
 | Allocation Method | `custrecord_lcm_lcm_allo_method` | Select, `customlist_lcm_allocation_method` | Allocation method for distributing landed cost to checked item rows. Defaults to `Value`; generated Vendor Bills copy it to `Landed Cost > Cost Allocation Method`. |
-| Expense Account | `custrecord_lcm_lcm_expense_account` | Select, Account (`-112`) | Account used when a Bill row creates an Expense line. Sourced from selected vendor when possible. |
+| Expense Account | `custrecord_lcm_lcm_expense_account` | Hidden select, Account (`-112`) | Account used when a Bill row creates an Expense line. Sourced from selected vendor when possible. |
 | LC Cost Item | `custrecord_lcm_lcm_cost_item` | Select, Item (`-10`) | Item used when a Bill row creates an Item line; sourced from LC Cost Profile. |
-| Debit Account | `custrecord_lcm_lcm_debit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constants. |
-| Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constants. |
+| Debit Account | `custrecord_lcm_lcm_debit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constant `journalDebitAccount`. |
+| Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows use fixed script constant `journalCreditAccount`. |
 | Department | `custrecord_lcm_lcm_department` | Select, Department (`-102`) | Optional accounting classification copied to generated transaction lines. |
 | Class | `custrecord_lcm_lcm_class` | Select, Class (`-101`) | Optional accounting classification copied to generated transaction lines. |
 | Location | `custrecord_lcm_lcm_location` | Select, Location (`-103`) | Optional accounting classification copied to generated transaction lines. |

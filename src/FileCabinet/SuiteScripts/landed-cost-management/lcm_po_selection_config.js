@@ -100,9 +100,9 @@ define([], () => {
   };
 
   const ACCOUNT_CONSTANTS = {
-    // Configure these account-specific internal IDs before relying on new Journal rows.
-    journalDebitAccount: '',
-    journalCreditAccount: '',
+    // Temporary fixed account internal IDs; replace with approved LCM posting accounts.
+    journalDebitAccount: '1',
+    journalCreditAccount: '2',
   };
 
   return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEBUG };

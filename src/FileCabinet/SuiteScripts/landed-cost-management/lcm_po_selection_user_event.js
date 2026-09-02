@@ -18,6 +18,14 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
     orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
+    hideSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
+      FIELDS.lcmLandedCosts.billType,
+      FIELDS.lcmLandedCosts.vendor,
+      FIELDS.lcmLandedCosts.subsidiary,
+      FIELDS.lcmLandedCosts.expenseAccount,
+      FIELDS.lcmLandedCosts.debitAccount,
+      FIELDS.lcmLandedCosts.creditAccount,
+    ]);
     disableSublistFields(context.form, SUBLISTS.lcmItems, [
       FIELDS.lcmItems.purchaseOrder,
       FIELDS.lcmItems.item,
@@ -33,13 +41,10 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
       FIELDS.lcmItems.totalUnitCost,
     ]);
     disableSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
-      FIELDS.lcmLandedCosts.billType,
-      FIELDS.lcmLandedCosts.subsidiary,
       FIELDS.lcmLandedCosts.costCategory,
       FIELDS.lcmLandedCosts.currency,
       FIELDS.lcmLandedCosts.exchangeRate,
       FIELDS.lcmLandedCosts.allocationMethod,
-      FIELDS.lcmLandedCosts.expenseAccount,
       FIELDS.lcmLandedCosts.billItem,
     ]);
 
@@ -202,12 +207,20 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
   }
 
   function disableSublistFields(form, sublistId, fieldIds) {
+    updateSublistFieldDisplay(form, sublistId, fieldIds, serverWidget.FieldDisplayType.DISABLED);
+  }
+
+  function hideSublistFields(form, sublistId, fieldIds) {
+    updateSublistFieldDisplay(form, sublistId, fieldIds, serverWidget.FieldDisplayType.HIDDEN);
+  }
+
+  function updateSublistFieldDisplay(form, sublistId, fieldIds, displayType) {
     try {
       const sublist = form.getSublist({ id: sublistId });
       fieldIds.forEach((fieldId) => {
         try {
           const field = sublist.getField({ id: fieldId });
-          field.updateDisplayType({ displayType: serverWidget.FieldDisplayType.DISABLED });
+          field.updateDisplayType({ displayType });
         } catch (fieldError) {
           log.audit({
             title: 'LCM sublist field display was not changed',

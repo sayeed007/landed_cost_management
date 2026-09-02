@@ -16,8 +16,30 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
   function beforeLoad(context) {
     if (!context.form) return;
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
+    hideBodyFields(context.form, [
+      FIELDS.lcmLandedCosts.billType,
+      FIELDS.lcmLandedCosts.vendor,
+      FIELDS.lcmLandedCosts.subsidiary,
+      FIELDS.lcmLandedCosts.expenseAccount,
+      FIELDS.lcmLandedCosts.debitAccount,
+      FIELDS.lcmLandedCosts.creditAccount,
+    ]);
     addServerDebugBanner(context);
     logFormFieldInventory(context);
+  }
+
+  function hideBodyFields(form, fieldIds) {
+    fieldIds.forEach((fieldId) => {
+      try {
+        const field = form.getField({ id: fieldId });
+        field.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+      } catch (error) {
+        log.audit({
+          title: 'LCM body field display was not changed',
+          details: `${fieldId}: ${error.message || error}`,
+        });
+      }
+    });
   }
 
   function addServerDebugBanner(context) {
