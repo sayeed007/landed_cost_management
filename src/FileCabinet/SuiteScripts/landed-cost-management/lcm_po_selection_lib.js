@@ -360,7 +360,9 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     const poLines = fetchPurchaseOrderItemLines(selectedPoIds, vendorIdInput);
     poLines.forEach((line) => {
       if (line.poLineKey && createdKeys.has(line.poLineKey)) return;
-      const existingRow = line.poLineKey ? existing.rowsByKey[line.poLineKey] : null;
+      const existingRow =
+        (line.poLineKey ? existing.rowsByKey[line.poLineKey] : null) ||
+        takeExistingRowWithoutKey(existing.rowsWithoutKey, line);
       if (existingRow) {
         if (updateLcmItem(existingRow, line)) updatedCount += 1;
       } else {
@@ -388,6 +390,17 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       updatedCount,
       deletedCount,
     };
+  }
+
+  function takeExistingRowWithoutKey(rowsWithoutKey, poLine) {
+    for (let index = 0; index < rowsWithoutKey.length; index += 1) {
+      const row = rowsWithoutKey[index];
+      if (normalizeComparable(row.poId) !== normalizeComparable(poLine.poId)) continue;
+      if (normalizeComparable(row.itemId) !== normalizeComparable(poLine.itemId)) continue;
+      rowsWithoutKey.splice(index, 1);
+      return row;
+    }
+    return null;
   }
 
   function hasCreatedAccountingRows(parentId) {

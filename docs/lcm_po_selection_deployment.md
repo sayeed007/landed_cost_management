@@ -98,6 +98,7 @@ On save:
 - Delete persisted `LCM Items` rows for deselected POs.
 - Create missing `LCM Items` rows for selected PO lines.
 - Update matched PO-derived fields by `custrecord_lcmitems_source_line_key`.
+- If a just-saved inline child row is missing that hidden key, match it once by PO + Item, write the generated key, and preserve the user's `Track Item` selection.
 - Preserve matched row values that are not sourced from the PO, including `Track Item`, `Unit Landed Cost`, and `Total Unit Cost`.
 - Avoid duplicates using `custrecord_lcmitems_source_line_key`.
 
