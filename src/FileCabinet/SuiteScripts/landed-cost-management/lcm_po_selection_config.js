@@ -7,6 +7,7 @@ define([], () => {
     landedCostManagement: 'customrecord_landed_cost_management',
     lcmItems: 'customrecord_lcmitems',
     lcmLandedCosts: 'customrecord_lcm_landed_cost',
+    lcmCostItemMap: 'customrecord_lcm_cost_item_map',
   };
 
   const FIELDS = {
@@ -26,10 +27,13 @@ define([], () => {
       expectedQuantityReceipt: 'custrecord_lcmitem_ex_receipt',
       quantityRemaining: 'custrecord_lcmitems_quantity_remaining',
       quantityBill: 'custrecord_lcmitems_quantity_bill',
+      billStatus: 'custrecord_lcmitems_bill_status',
       unitType: 'custrecord_lcmitems_unit_type',
       poRate: 'custrecord_lcmitems_po_rate',
+      poValue: 'custrecord_lcmitems_po_value',
       unitLandedCost: 'custrecord_lcmitems_unit_landed_cost',
       totalUnitCost: 'custrecord_lcmitems_total_unit_cost',
+      totalValue: 'custrecord_lcmitems_total_value',
       exchangeRate: 'custrecord_lcmitems_exchange_rate',
       trackItem: 'custrecord_lcmitems_track_item',
 
@@ -42,7 +46,9 @@ define([], () => {
       billLineType: 'custrecord_lcm_lcm_bill_line_type',
       billType: 'custrecord_lcm_lcm_cost_bill_type',
       vendor: 'custrecord_lcm_lcm_vendor',
+      legacyCostVendorName: 'custrecord_lcm_lcm_cost_vendor_name',
       subsidiary: 'custrecord_lcm_lcm_subsidiary',
+      costItemMap: 'custrecord_lcm_lcm_cost_item_map',
       costProfile: 'custrecord_lcm_lcm_cost_profile',
       costCategory: 'custrecord_lcm_lcm_cost_category',
       amount: 'custrecord_lcm_lcm_amout',
@@ -66,6 +72,11 @@ define([], () => {
       createdDate: 'custrecord_lcm_lcm_created_date',
       costAllocatedInGrn: 'custrecord_lcm_lcm_cost_allocation_grn',
       grnNumber: 'custrecord_lcm_lcm_grn_number',
+    },
+    lcmCostItemMap: {
+      costCategory: 'custrecord_lcm_ccim_category',
+      costItem: 'custrecord_lcm_ccim_item',
+      memo: 'custrecord_lcm_ccim_memo',
     },
   };
 
@@ -105,5 +116,10 @@ define([], () => {
     journalCreditAccount: '2',
   };
 
-  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEBUG };
+  const DEFAULTS = {
+    billLineTypeText: 'Item',
+    billTypeText: 'LC Bill',
+  };
+
+  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEFAULTS, DEBUG };
 });

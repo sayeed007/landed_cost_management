@@ -44,15 +44,18 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     const message =
       `LCM client loaded.\n` +
       `Record type: ${safeRecordType(rec)}\n` +
+      `Cost Item Map field: ${FIELDS.lcmLandedCosts.costItemMap} reachable=${reachable.costItemMap}\n` +
       `Profile field: ${FIELDS.lcmLandedCosts.costProfile} reachable=${reachable.profile}\n` +
       `Cost Category field: ${FIELDS.lcmLandedCosts.costCategory} reachable=${reachable.costCategory}\n` +
       `LC Cost Item field: ${FIELDS.lcmLandedCosts.billItem} reachable=${reachable.item}\n` +
       `Selected source: ${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
         ''}"`;
     traceClient('LCM client script loaded', message);
-    if (!reachable.profile && !reachable.costCategory) {
+    if (!reachable.costItemMap && !reachable.profile && !reachable.costCategory) {
       window.alert(
         'LCM client script loaded, but this form has no field "' +
+          FIELDS.lcmLandedCosts.costItemMap +
+          '", "' +
           FIELDS.lcmLandedCosts.costProfile +
           '" or "' +
           FIELDS.lcmLandedCosts.costCategory +
@@ -65,6 +68,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
   function listReachableFields(rec) {
     return {
+      costItemMap: fieldExists(rec, FIELDS.lcmLandedCosts.costItemMap),
       profile: fieldExists(rec, FIELDS.lcmLandedCosts.costProfile),
       costCategory: fieldExists(rec, FIELDS.lcmLandedCosts.costCategory),
       item: fieldExists(rec, FIELDS.lcmLandedCosts.billItem),
@@ -105,6 +109,16 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   function fieldChanged(context) {
     if (syncing) return;
     traceFieldChanged(context);
+
+    if (context.sublistId === SUBLISTS.lcmItems && isItemRecalculationField(context.fieldId)) {
+      recalculateCurrentItemLine(currentRecord.get());
+      return;
+    }
+
+    if (isLandedCostField(context, FIELDS.lcmLandedCosts.vendor)) {
+      syncLandedCostVendorDefaults(currentRecord.get(), context.sublistId);
+      return;
+    }
 
     if (!context.sublistId && context.fieldId === FIELDS.landedCostManagement.vendor) {
       syncHeaderVendorDefaults(currentRecord.get());
@@ -172,14 +186,14 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   function syncCostProfileDefaults(rec, contextSublistId) {
     const sublistId = getLandedCostSublistId(contextSublistId);
     const selectedCategory = getSelectedCostCategory(rec, sublistId);
-    const costCategoryId = selectedCategory.value;
-    const costCategoryText = selectedCategory.text;
+    const selectedValue = selectedCategory.value;
+    const selectedText = selectedCategory.text;
 
-    if (!costCategoryId && !costCategoryText) {
+    if (!selectedValue && !selectedText) {
       // Reaching here on a fieldChanged for the profile field means the field id is wrong for
       // this form. Staying silent here is what made the original failure invisible.
       log.audit({
-        title: 'LCM LC Cost Profile sourcing skipped',
+        title: 'LCM LC Cost Category sourcing skipped',
         details: `No value readable from "${getCostProfileSourceFieldIds().join('" or "')}" (sublist "${sublistId ||
           'body'}"). Either nothing is selected, or that field id does not exist on this form.`,
       });
@@ -188,45 +202,57 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
     try {
       traceClient(
-        'LCM LC Cost Profile matched',
+        'LCM LC Cost Category matched',
         `Starting lookup.\n` +
           `sublistId=${sublistId || '(body)'}\n` +
           `source field=${selectedCategory.fieldId || '(none)'}\n` +
-          `selected value=${costCategoryId || '(blank)'}\n` +
-          `selected text="${costCategoryText || ''}"\n` +
+          `selected value=${selectedValue || '(blank)'}\n` +
+          `selected text="${selectedText || ''}"\n` +
           `target item field=${FIELDS.lcmLandedCosts.billItem}\n` +
           `available current sublist fields=${getSublistFieldIds(rec, sublistId).join(', ') || '(none)'}`
       );
-      const defaults = fetchCostProfileDefaults(costCategoryId, costCategoryText);
+      const defaults =
+        selectedCategory.fieldId === FIELDS.lcmLandedCosts.costItemMap
+          ? fetchCostItemMapDefaults(selectedValue)
+          : fetchCostProfileDefaults(selectedValue, selectedText);
       traceClient(
-        'LCM LC Cost Profile lookup returned',
+        'LCM LC Cost Category lookup returned',
+        `costItemMap=${defaults.costItemMap || '(blank)'}\n` +
+          `costItemMapText="${defaults.costItemMapText || ''}"\n` +
         `costCategory=${defaults.costCategory || '(blank)'}\n` +
           `costCategoryText="${defaults.costCategoryText || ''}"\n` +
           `attemptedItemName="${defaults.attemptedItemName || ''}"\n` +
           `billItem=${defaults.billItem || '(blank)'}\n` +
           `billItemText="${defaults.billItemText || ''}"\n` +
+          `source=${defaults.source || '(none)'}\n` +
+          `mappingRecordId=${defaults.mappingRecordId || '(none)'}\n` +
           `matched=${Boolean(defaults.matched)}\n` +
           `reason=${defaults.reason || '(none)'}`
       );
+      const mapSet =
+        selectedCategory.fieldId === FIELDS.lcmLandedCosts.costItemMap ||
+        applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costItemMap, defaults.costItemMap, defaults.costItemMapText);
       const categorySet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
       const itemSet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
       const writtenItem = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.billItem);
       const writtenItemText = getLandedCostText(rec, sublistId, FIELDS.lcmLandedCosts.billItem);
 
       log.audit({
-        title: 'LCM LC Cost Profile sourcing',
+        title: 'LCM LC Cost Category sourcing',
         details:
           `Source field: ${selectedCategory.fieldId || '(none)'}. ` +
-          `Cost Profile internal id: ${costCategoryId || '(none)'}. ` +
-          `Cost Profile text: "${costCategoryText || defaults.costCategoryText}". ` +
+          `Selected internal id: ${selectedValue || '(none)'}. ` +
+          `Selected text: "${selectedText || defaults.costItemMapText || defaults.costCategoryText}". ` +
           `Attempted item name: "${defaults.attemptedItemName || ''}". ` +
           `Resolved item: ${defaults.billItem || '(none)'}. Written to form: ${itemSet}. ` +
+          `Source: ${defaults.source || '(none)'}. Mapping record: ${defaults.mappingRecordId || '(none)'}. ` +
           `Reason: ${defaults.reason || '(none)'}`,
       });
 
       traceClient(
         'LCM LC Cost Item write result',
-        `costCategorySet=${categorySet}\n` +
+        `costItemMapSet=${mapSet}\n` +
+          `costCategorySet=${categorySet}\n` +
           `itemSet=${itemSet}\n` +
           `target field=${FIELDS.lcmLandedCosts.billItem}\n` +
           `current target value=${writtenItem || '(blank)'}\n` +
@@ -245,7 +271,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
           });
         } else {
           window.alert(
-            `No active item is named exactly "${defaults.costCategoryText || costCategoryText}", ` +
+            `No active LC Cost Item mapping was found for "${defaults.costItemMapText || defaults.costCategoryText || selectedText}", ` +
               `so LC Cost Item was left empty.
 
 ${defaults.reason || ''}`
@@ -257,7 +283,9 @@ ${defaults.reason || ''}`
         title: 'LCM cost profile defaults were not sourced',
         details: error.message || error,
       });
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, costCategoryId, costCategoryText);
+      if (selectedCategory.fieldId !== FIELDS.lcmLandedCosts.costItemMap) {
+        applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, selectedValue, selectedText);
+      }
       window.alert(
         `LC Cost Item could not be looked up: ${error.message || error}
 
@@ -265,23 +293,23 @@ ${defaults.reason || ''}`
           'It will still be set when the record is saved.'
       );
     }
-    copyHeaderDefaultsToLandedCostLine(rec, sublistId);
+    syncLandedCostVendorDefaults(rec, sublistId);
     syncAllocationMethodDefault(rec, contextSublistId);
   }
 
-  function copyHeaderDefaultsToLandedCostLine(rec, sublistId) {
-    const vendorId = safeGetValue(rec, FIELDS.landedCostManagement.vendor);
-    const subsidiaryId = safeGetValue(rec, FIELDS.landedCostManagement.subsidiary);
-    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.vendor, vendorId);
-    applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary, subsidiaryId);
+  function syncLandedCostVendorDefaults(rec, contextSublistId) {
+    const sublistId = getLandedCostSublistId(contextSublistId);
+    const vendorId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.vendor);
     if (!vendorId) return;
 
     try {
       const defaults = fetchVendorBillDefaults(vendorId);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.currency, defaults.currency, defaults.currencyText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.exchangeRate, defaults.exchangeRate);
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billType, defaults.billType, defaults.billTypeText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billLineType, '', config.DEFAULTS.billLineTypeText);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billType, '', config.DEFAULTS.billTypeText);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
     } catch (error) {
       log.audit({
         title: 'LCM landed cost row vendor defaults were not sourced',
@@ -290,14 +318,63 @@ ${defaults.reason || ''}`
     }
   }
 
+  function isItemRecalculationField(fieldId) {
+    return [
+      FIELDS.lcmItems.quantityReceipt,
+      FIELDS.lcmItems.expectedQuantityReceipt,
+      FIELDS.lcmItems.poRate,
+      FIELDS.lcmItems.totalUnitCost,
+    ].indexOf(fieldId) >= 0;
+  }
+
+  function recalculateCurrentItemLine(rec) {
+    const sublistId = SUBLISTS.lcmItems;
+    const expectedQuantity = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.expectedQuantityReceipt)) || 0;
+    const quantityReceipt = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.quantityReceipt)) || 0;
+    const poRate = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.poRate)) || 0;
+    const totalUnitCost = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.totalUnitCost)) || 0;
+
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityRemaining, Math.max(0, expectedQuantity - quantityReceipt));
+    setCurrentIfPresent(
+      rec,
+      sublistId,
+      FIELDS.lcmItems.billStatus,
+      expectedQuantity === quantityReceipt ? 'full' : 'partial'
+    );
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poValue, roundCurrency(poRate * quantityReceipt));
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.totalValue, roundCurrency(totalUnitCost * quantityReceipt));
+  }
+
+  function getCurrentSublistValue(rec, sublistId, fieldId) {
+    try {
+      return rec.getCurrentSublistValue({ sublistId, fieldId });
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function toNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function roundCurrency(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+  }
+
   function syncAllocationMethodDefault(rec, contextSublistId) {
     const sublistId = getLandedCostSublistId(contextSublistId);
-    const costCategoryId =
-      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costCategory) ||
-      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
-    if (!costCategoryId) return;
-
     try {
+      let costCategoryId =
+        getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costCategory) ||
+        getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
+      if (!costCategoryId) {
+        const costItemMapId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costItemMap);
+        costCategoryId = costItemMapId ? fetchCostItemMapDefaults(costItemMapId).costCategory : '';
+      }
+      if (!costCategoryId) return;
+
       const defaults = fetchAllocationMethodDefault(costCategoryId);
       setTextIfPresent(rec, sublistId, FIELDS.lcmLandedCosts.allocationMethod, defaults.allocationMethodText);
     } catch (error) {
@@ -314,7 +391,7 @@ ${defaults.reason || ''}`
 
   function getCostProfileSourceFieldIds() {
     const f = FIELDS.lcmLandedCosts;
-    return [f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
+    return [f.costItemMap, f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
   }
 
   function getSelectedCostCategory(rec, sublistId) {
@@ -366,7 +443,22 @@ ${defaults.reason || ''}`
   }
 
   // Resolved server side through the Suitelet rather than with a client-side N/search, so the
-  // client and the beforeSubmit fallback always agree on which item a profile maps to.
+  // client and the beforeSubmit path always agree on which category/item a mapping row carries.
+  function fetchCostItemMapDefaults(costItemMapId) {
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        action: 'costItemMapDefaults',
+        costItemMapId: costItemMapId || '',
+      },
+    });
+    const response = https.get({ url: suiteletUrl });
+    const payload = JSON.parse(response.body || '{}');
+    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Category mapping defaults.');
+    return payload.defaults || {};
+  }
+
   function fetchCostProfileDefaults(costCategoryId, costCategoryText) {
     const suiteletUrl = url.resolveScript({
       scriptId: SCRIPTS.accountingSuitelet.scriptId,
@@ -391,7 +483,7 @@ ${defaults.reason || ''}`
         `response body=${String(response.body || '').slice(0, 900)}`
     );
     const payload = JSON.parse(response.body || '{}');
-    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Profile defaults.');
+    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Category defaults.');
     return payload.defaults || {};
   }
 
@@ -461,7 +553,7 @@ ${defaults.reason || ''}`
     );
     const vendorId = safeGetValue(rec, FIELDS.landedCostManagement.vendor);
     if (selectedPoIds.length && !vendorId) {
-      throw new Error('Select Vendor before selecting Purchase Orders.');
+      throw new Error('Select Purchase Order Vendor before selecting Purchase Orders.');
     }
     const poLines = selectedPoIds.length ? fetchPoLines(selectedPoIds, vendorId) : [];
 
@@ -502,12 +594,13 @@ ${defaults.reason || ''}`
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.purchaseOrder, poLine.poId);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.item, poLine.itemId);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.description, poLine.description || poLine.itemText);
-    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityReceipt, poLine.quantityReceived);
-    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.expectedQuantityReceipt, poLine.quantity);
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityReceipt, poLine.quantityReceipt);
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.expectedQuantityReceipt, poLine.expectedQuantityReceipt);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityRemaining, poLine.quantityRemaining);
-    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityBill, poLine.quantityBilled);
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.billStatus, poLine.billStatus);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.unitType, poLine.unitType);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poRate, poLine.poRate);
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poValue, poLine.poValue);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.exchangeRate, poLine.exchangeRate);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.trackItem, false);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poLineKey, poLine.poLineKey);

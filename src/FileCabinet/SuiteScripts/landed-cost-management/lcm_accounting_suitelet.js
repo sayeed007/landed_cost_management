@@ -9,8 +9,12 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
         renderVendorDefaults(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'allocationMethodDefault') {
         renderAllocationMethodDefault(context);
+      } else if (context.request.method === 'GET' && context.request.parameters.action === 'costItemMapDefaults') {
+        renderCostItemMapDefaults(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'costProfileDefaults') {
         renderCostProfileDefaults(context);
+      } else if (context.request.method === 'GET' && context.request.parameters.action === 'costCategoryItemMatches') {
+        renderCostCategoryItemMatches(context);
       } else if (context.request.method === 'POST') {
         renderResult(context);
       } else {
@@ -45,6 +49,15 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
     context.response.write(JSON.stringify(payload));
   }
 
+  function renderCostItemMapDefaults(context) {
+    const costItemMapId = context.request.parameters.costItemMapId || '';
+    const payload = {
+      ok: Boolean(costItemMapId),
+      defaults: costItemMapId ? accounting.getCostItemMapDefaults(costItemMapId) : {},
+    };
+    context.response.write(JSON.stringify(payload));
+  }
+
   function renderCostProfileDefaults(context) {
     const costCategoryId = context.request.parameters.costCategoryId || '';
     const costCategoryText = context.request.parameters.costCategoryText || '';
@@ -56,6 +69,15 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
           : {},
     };
     context.response.write(JSON.stringify(payload));
+  }
+
+  function renderCostCategoryItemMatches(context) {
+    const payload = {
+      ok: true,
+      matches: accounting.listCostCategoryItemMatches(),
+    };
+    const callback = sanitizeCallbackName(context.request.parameters.callback || '');
+    context.response.write(callback ? `${callback}(${JSON.stringify(payload)});` : JSON.stringify(payload));
   }
 
   function renderPreview(context) {
@@ -181,6 +203,11 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function sanitizeCallbackName(value) {
+    const name = String(value || '');
+    return /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(name) ? name : '';
   }
 
   function getErrorMessage(error) {

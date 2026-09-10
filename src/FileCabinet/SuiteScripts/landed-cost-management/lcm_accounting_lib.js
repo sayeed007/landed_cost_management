@@ -3,7 +3,7 @@
  * @NModuleScope SameAccount
  */
 define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'], (format, log, record, search, config) => {
-  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS } = config;
+  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEFAULTS } = config;
   const STATUS = {
     pending: 'Pending',
     created: 'Created',
@@ -14,6 +14,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   };
   const vendorDefaultsCache = {};
   const costProfileDefaultsCache = {};
+  const costItemMapCache = {};
   const journalAccountCandidatesCache = {};
 
   function toNumber(value) {
@@ -158,6 +159,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       f.billType,
       f.vendor,
       f.subsidiary,
+      f.costItemMap,
       f.costProfile,
       f.costCategory,
       f.amount,
@@ -210,6 +212,8 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           vendorText: getText(result, f.vendor),
           subsidiary: getValue(result, f.subsidiary),
           subsidiaryText: getText(result, f.subsidiary),
+          costItemMap: getValue(result, f.costItemMap),
+          costItemMapText: getText(result, f.costItemMap),
           costProfile: getValue(result, f.costProfile),
           costProfileText: getText(result, f.costProfile),
           costCategory: getValue(result, f.costCategory),
@@ -251,8 +255,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
         isDynamic: false,
       });
       return {
-        vendor: getRecordValue(rec, FIELDS.landedCostManagement.vendor),
-        vendorText: getRecordText(rec, FIELDS.landedCostManagement.vendor),
         subsidiary: getRecordValue(rec, FIELDS.landedCostManagement.subsidiary),
         subsidiaryText: getRecordText(rec, FIELDS.landedCostManagement.subsidiary),
       };
@@ -262,14 +264,12 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function enrichRow(row, parentDefaults) {
-    if (!row.vendor && parentDefaults.vendor) {
-      row.vendor = parentDefaults.vendor;
-      row.vendorText = parentDefaults.vendorText || row.vendorText;
-    }
     if (!row.subsidiary && parentDefaults.subsidiary) {
       row.subsidiary = parentDefaults.subsidiary;
       row.subsidiaryText = parentDefaults.subsidiaryText || row.subsidiaryText;
     }
+    row.billLineTypeText = row.billLineTypeText || DEFAULTS.billLineTypeText;
+    row.billTypeText = DEFAULTS.billTypeText;
     applyCostProfileDefaults(row);
     return enrichRowFromVendor(row);
   }
@@ -285,17 +285,27 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (!row.expenseAccount && defaults.expenseAccount) {
       row.expenseAccount = defaults.expenseAccount;
     }
+    if (!row.currency && defaults.currency) {
+      row.currency = defaults.currency;
+      row.currencyText = defaults.currencyText || row.currencyText;
+    }
 
     return row;
   }
 
   function applyCostProfileDefaults(row) {
-    const defaults = getCostProfileDefaults(
-      row.costProfile || row.costCategory,
-      row.costProfileText || row.costCategoryText
-    );
+    const defaults = row.costItemMap
+      ? getCostItemMapDefaults(row.costItemMap)
+      : getCostProfileDefaults(
+          row.costProfile || row.costCategory,
+          row.costProfileText || row.costCategoryText
+        );
     if (!defaults.costCategory && !defaults.costCategoryText) return row;
 
+    if (!row.costItemMap) {
+      row.costItemMap = defaults.costItemMap || row.costItemMap;
+      row.costItemMapText = defaults.costItemMapText || row.costItemMapText;
+    }
     if (!row.costCategory) {
       row.costCategory = defaults.costCategory || row.costCategory;
       row.costCategoryText = defaults.costCategoryText || row.costCategoryText;
@@ -307,36 +317,121 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return row;
   }
 
+  function getCostItemMapDefaults(costItemMapId) {
+    const mapId = normalizeValue(costItemMapId);
+    const cacheKey = `map|${mapId}`;
+    if (costProfileDefaultsCache[cacheKey]) return costProfileDefaultsCache[cacheKey];
+
+    const map = lookupCostItemMapById(mapId);
+    const activeItem = findActiveItemByInternalId(map.billItem, map.billItemText);
+    const itemMissing = !activeItem.id;
+    const defaults = {
+      costItemMap: map.id,
+      costItemMapText: map.text,
+      costCategory: map.costCategory,
+      costCategoryText: map.costCategoryText,
+      billItem: activeItem.id,
+      billItemText: activeItem.text,
+      attemptedItemName: map.billItemText,
+      matched: Boolean(map.id && map.costCategory && activeItem.id),
+      reason: itemMissing ? activeItem.reason || map.reason : map.reason,
+      source: map.id ? 'mapping record' : 'none',
+      mappingRecordId: map.id,
+    };
+
+    log[defaults.matched ? 'audit' : 'error']({
+      title: `LCM Cost Category Item Map ${defaults.matched ? 'resolved' : 'did NOT resolve'} defaults`,
+      details:
+        `Mapping record: ${mapId || '(none)'}. ` +
+        `Category: ${defaults.costCategory || '(none)'} ("${defaults.costCategoryText || ''}"). ` +
+        `Item: ${defaults.billItem || '(none)'} ("${defaults.billItemText || ''}"). ` +
+        `Reason: ${defaults.reason || '(none)'}`,
+    });
+
+    costProfileDefaultsCache[cacheKey] = defaults;
+    return defaults;
+  }
+
   function getCostProfileDefaults(costCategoryId, costCategoryText) {
     const categoryId = normalizeValue(costCategoryId);
     const categoryText = normalizeValue(costCategoryText) || lookupCostCategoryName(categoryId);
     const cacheKey = `${categoryId}|${categoryText}`;
     if (costProfileDefaultsCache[cacheKey]) return costProfileDefaultsCache[cacheKey];
 
-    const billItem = findActiveItemByExactName(categoryText);
+    const mappedItem = findMappedCostItem(categoryId);
     const defaults = {
+      costItemMap: mappedItem.mappingRecordId || '',
+      costItemMapText: mappedItem.mappingRecordText || '',
       costCategory: categoryId,
       costCategoryText: categoryText,
-      billItem: billItem.id,
-      billItemText: billItem.text,
-      attemptedItemName: categoryText,
-      matched: Boolean(billItem.id),
-      reason: billItem.reason || '',
+      billItem: mappedItem.id,
+      billItemText: mappedItem.text,
+      attemptedItemName: '',
+      matched: Boolean(mappedItem.id),
+      reason: mappedItem.reason,
+      source: mappedItem.id ? 'category mapping' : 'none',
+      mappingRecordId: mappedItem.mappingRecordId || '',
     };
 
     log[defaults.matched ? 'audit' : 'error']({
-      title: `LCM LC Cost Profile ${defaults.matched ? 'resolved' : 'did NOT resolve'} an LC Cost Item`,
+      title: `LCM LC Cost Category ${defaults.matched ? 'resolved' : 'did NOT resolve'} an LC Cost Item`,
       details:
         `Cost Profile internal id: ${categoryId || '(none)'}. ` +
         `Cost Profile text: "${categoryText || '(none)'}". ` +
-        `Attempted item name: "${defaults.attemptedItemName || '(none)'}". ` +
         `Result: ${
           defaults.matched ? `item ${defaults.billItem} ("${defaults.billItemText}")` : 'no item set'
-        }. Reason: ${defaults.reason || '(none)'}`,
+        }. Source: ${defaults.source}. Mapping record: ${defaults.mappingRecordId || '(none)'}. ` +
+        `Reason: ${defaults.reason || '(none)'}`,
     });
 
     costProfileDefaultsCache[cacheKey] = defaults;
     return defaults;
+  }
+
+  function lookupCostItemMapById(costItemMapId) {
+    const mapId = normalizeValue(costItemMapId);
+    if (!mapId) return { id: '', text: '', reason: 'No LCM Cost Category Item Map was selected.' };
+
+    const f = FIELDS.lcmCostItemMap;
+    try {
+      const results = search
+        .create({
+          type: RECORDS.lcmCostItemMap,
+          filters: [['isinactive', 'is', 'F'], 'AND', ['internalid', 'anyof', mapId]],
+          columns: ['internalid', 'name', f.costCategory, f.costItem],
+        })
+        .run()
+        .getRange({ start: 0, end: 1 });
+
+      if (!results || !results.length) {
+        return {
+          id: '',
+          text: '',
+          reason: `LCM Cost Category Item Map record ${mapId} is inactive or cannot be found.`,
+        };
+      }
+
+      const result = results[0];
+      const categoryId = normalizeValue(result.getValue({ name: f.costCategory }));
+      const categoryText = normalizeValue(result.getText({ name: f.costCategory }));
+      const itemId = normalizeValue(result.getValue({ name: f.costItem }));
+      const itemText = normalizeValue(result.getText({ name: f.costItem }));
+      return {
+        id: normalizeValue(result.getValue({ name: 'internalid' })),
+        text: normalizeValue(result.getValue({ name: 'name' })) || categoryText,
+        costCategory: categoryId,
+        costCategoryText: categoryText,
+        billItem: itemId,
+        billItemText: itemText,
+        reason: `Matched LCM Cost Category Item Map record ${mapId}.`,
+      };
+    } catch (error) {
+      return {
+        id: '',
+        text: '',
+        reason: `LCM Cost Category Item Map record ${mapId} lookup failed: ${error.message || error}`,
+      };
+    }
   }
 
   function lookupCostCategoryName(costCategoryId) {
@@ -363,54 +458,160 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return '';
   }
 
-  function findActiveItemByExactName(itemName) {
-    const name = normalizeValue(itemName).trim();
-    if (!name) {
-      return { id: '', text: '', reason: 'LC Cost Profile carried no text to match an item name against.' };
+  function findMappedCostItem(costCategoryId) {
+    const categoryId = normalizeValue(costCategoryId);
+    if (!categoryId) return { id: '', text: '', reason: 'No LC Cost Category internal ID was available for mapping lookup.' };
+    if (costItemMapCache[categoryId]) return costItemMapCache[categoryId];
+
+    const f = FIELDS.lcmCostItemMap;
+    try {
+      const results = search
+        .create({
+          type: RECORDS.lcmCostItemMap,
+          filters: [['isinactive', 'is', 'F'], 'AND', [f.costCategory, 'anyof', categoryId]],
+          columns: ['internalid', 'name', f.costCategory, f.costItem],
+        })
+        .run()
+        .getRange({ start: 0, end: 2 });
+
+      if (!results || !results.length) {
+        costItemMapCache[categoryId] = {
+          id: '',
+          text: '',
+          reason: `No active LCM Cost Category Item Map record exists for category ${categoryId}.`,
+        };
+        return costItemMapCache[categoryId];
+      }
+
+      const result = results[0];
+      const mappingRecordId = normalizeValue(result.getValue({ name: 'internalid' }));
+      const mappingRecordText = normalizeValue(result.getValue({ name: 'name' })) || normalizeValue(result.getText({ name: f.costCategory }));
+      const mappedItemId = normalizeValue(result.getValue({ name: f.costItem }));
+      const mappedItemText = normalizeValue(result.getText({ name: f.costItem }));
+      const activeItem = findActiveItemByInternalId(mappedItemId, mappedItemText);
+      costItemMapCache[categoryId] = {
+        id: activeItem.id,
+        text: activeItem.text,
+        mappingRecordId,
+        mappingRecordText,
+        reason:
+          activeItem.reason ||
+          (results.length > 1
+            ? `Matched mapping record ${mappingRecordId}; more than one active map exists for this category. Took the first.`
+            : `Matched mapping record ${mappingRecordId}.`),
+      };
+      return costItemMapCache[categoryId];
+    } catch (error) {
+      costItemMapCache[categoryId] = {
+        id: '',
+        text: '',
+        reason: `LCM Cost Category Item Map lookup failed: ${error.message || error}`,
+      };
+      return costItemMapCache[categoryId];
+    }
+  }
+
+  function findActiveItemByInternalId(itemId, itemText) {
+    const id = normalizeValue(itemId);
+    if (!id) return { id: '', text: '', reason: 'Mapped LC Cost Item was blank.' };
+
+    try {
+      const results = search
+        .create({
+          type: 'item',
+          filters: [['isinactive', 'is', 'F'], 'AND', ['internalid', 'anyof', id]],
+          columns: ['internalid', 'itemid', 'displayname'],
+        })
+        .run()
+        .getRange({ start: 0, end: 1 });
+
+      if (results && results.length) {
+        const result = results[0];
+        return {
+          id,
+          text:
+            normalizeValue(result.getValue({ name: 'itemid' })) ||
+            normalizeValue(result.getValue({ name: 'displayname' })) ||
+            normalizeValue(itemText) ||
+            id,
+          reason: `Matched active item through LCM Cost Category Item Map.`,
+        };
+      }
+    } catch (error) {
+      return { id: '', text: normalizeValue(itemText), reason: `Mapped item ${id} lookup failed: ${error.message || error}` };
     }
 
-    // `name` is not a searchable field on an item search and throws. `itemid` is Name/Number,
-    // `displayname` is Display Name; those are the two an exact match can run against.
-    const attempts = [['itemid', 'is', name], ['displayname', 'is', name]];
-    const tried = [];
+    return { id: '', text: normalizeValue(itemText), reason: `Mapped item ${id} is not active or cannot be found.` };
+  }
 
-    for (let index = 0; index < attempts.length; index += 1) {
-      const attempt = attempts[index];
+  function listCostCategoryItemMatches() {
+    const f = FIELDS.lcmCostItemMap;
+    const rows = [];
+
+    search
+      .create({
+        type: RECORDS.lcmCostItemMap,
+        filters: [['isinactive', 'is', 'F']],
+        columns: ['internalid', 'name', f.costCategory, f.costItem],
+      })
+      .run()
+      .each((result) => {
+        const mapId = normalizeValue(result.getValue({ name: 'internalid' }));
+        const defaults = getCostItemMapDefaults(mapId);
+        if (!defaults.matched) return true;
+        rows.push({
+          costItemMapId: mapId,
+          costItemMapText: normalizeValue(result.getValue({ name: 'name' })) || defaults.costCategoryText,
+          costCategoryId: defaults.costCategory,
+          costCategoryText: defaults.costCategoryText,
+          itemId: defaults.billItem,
+          itemText: defaults.billItemText,
+          matched: true,
+          source: defaults.source,
+          mappingRecordId: defaults.mappingRecordId,
+          reason: defaults.reason || '',
+        });
+        return true;
+      });
+
+    return rows;
+  }
+
+  function listCostCategories() {
+    const attempts = [
+      { type: 'costcategory', columns: ['internalid', 'name'] },
+      { type: 'landedcostcategory', columns: ['internalid', 'name'] },
+    ];
+    const categoriesById = {};
+
+    attempts.forEach((attempt) => {
       try {
-        const results = search
+        search
           .create({
-            type: 'item',
-            filters: [['isinactive', 'is', 'F'], 'AND', attempt],
-            columns: ['internalid', 'itemid', 'displayname'],
+            type: attempt.type,
+            filters: [],
+            columns: attempt.columns,
           })
           .run()
-          .getRange({ start: 0, end: 2 });
-
-        if (results && results.length) {
-          const result = results[0];
-          return {
-            id: normalizeValue(result.getValue({ name: 'internalid' })),
-            text:
-              normalizeValue(result.getValue({ name: 'itemid' })) ||
-              normalizeValue(result.getValue({ name: 'displayname' })) ||
-              name,
-            reason:
-              results.length > 1
-                ? `Matched on ${attempt[0]}, but more than one active item carries this name. Took the first.`
-                : `Matched on ${attempt[0]}.`,
-          };
-        }
-        tried.push(`${attempt[0]} is "${name}" -> 0 rows`);
-      } catch (searchError) {
-        tried.push(`${attempt[0]} is "${name}" -> ${searchError.message || searchError}`);
+          .each((result) => {
+            const id = normalizeValue(result.getValue({ name: 'internalid' }));
+            const text = normalizeValue(result.getValue({ name: 'name' })) || normalizeValue(result.getText({ name: 'name' }));
+            if (id && text && !categoriesById[id]) {
+              categoriesById[id] = { id, text };
+            }
+            return true;
+          });
+      } catch (error) {
+        log.audit({
+          title: 'LCM cost category list attempt failed',
+          details: `${attempt.type}: ${error.message || error}`,
+        });
       }
-    }
+    });
 
-    const reason =
-      `No active item matched. Tried ${tried.join('; ')}. Confirm the item is active and its ` +
-      `Name/Number equals the LC Cost Profile text exactly. A subitem's Name/Number includes its ` +
-      `parent ("Parent : ${name}"), so a subitem will not match on itemid.`;
-    return { id: '', text: name, reason };
+    return Object.keys(categoriesById)
+      .map((id) => categoriesById[id])
+      .sort((a, b) => a.text.localeCompare(b.text));
   }
 
   function getVendorDefaults(vendorId) {
@@ -540,7 +741,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
         ],
         columns: [
           'internalid',
-          f.expectedQuantityReceipt,
+          f.quantityReceipt,
           f.poRate,
           f.exchangeRate,
           f.unitLandedCost,
@@ -549,9 +750,11 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       })
       .run()
       .each((result) => {
+        const quantity = toNumber(getValue(result, f.quantityReceipt));
+        if (quantity !== null && quantity <= 0) return true;
         rows.push({
           id: getValue(result, 'internalid'),
-          quantity: toNumber(getValue(result, f.expectedQuantityReceipt)) || 1,
+          quantity: quantity === null ? 1 : quantity,
           poRate: toNumber(getValue(result, f.poRate)) || 0,
           exchangeRate: toNumber(getValue(result, f.exchangeRate)) || 1,
           unitLandedCost: toNumber(getValue(result, f.unitLandedCost)) || 0,
@@ -569,20 +772,12 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (!row.amount || row.amount <= 0) errors.push('Amount is required and must be greater than zero');
     if (!row.subsidiary) errors.push('Subsidiary is required');
     if (mode === MODES.bill) {
-      const lineType = normalizeChoice(row.billLineTypeText || row.billLineType);
       if (!row.vendor) errors.push('Vendor is required for Vendor Bill');
-      if (!row.billType) errors.push('Bill Type is required for Vendor Bill');
-      if (!lineType) errors.push('Bill Line Type is required');
-      if (!row.costProfile && !row.costProfileText) errors.push('LC Cost Profile is required');
+      if (!row.costItemMap && !row.costProfile && !row.costProfileText) errors.push('LC Cost Category is required');
       if (!row.costCategory && !row.costCategoryText) {
         errors.push('Cost Category is required for landed-cost bill lines');
       }
-      if (lineType.indexOf('expense') >= 0 && !row.expenseAccount) {
-        errors.push('Expense Account is required for expense bill lines');
-      }
-      if (lineType.indexOf('item') >= 0 && !row.billItem && !row.billItemText) {
-        errors.push('Bill Item is required for item bill lines');
-      }
+      if (!row.billItem && !row.billItemText) errors.push('Bill Item is required for item bill lines');
     } else {
       const debitAccount = getJournalDebitAccount(row);
       const creditAccount = getJournalCreditAccount(row);
@@ -611,7 +806,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           subsidiary: row.subsidiary,
           subsidiaryText: row.subsidiaryText,
           billType: row.billType,
-          billTypeText: row.billTypeText,
+          billTypeText: DEFAULTS.billTypeText,
           currency: row.currency,
           currencyText: row.currencyText,
           createdTransactionId: existingTransaction.id || '',
@@ -637,7 +832,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function buildGroupKey(row, mode) {
     return mode === MODES.bill
-      ? [row.vendor, row.subsidiary, row.billType, row.currency].join('|')
+      ? [row.vendor, row.subsidiary, row.currency].join('|')
       : [row.subsidiary, row.currency].join('|');
   }
 
@@ -664,7 +859,14 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (!group.createdTransactionId) {
       setIfPresent(bill, 'entity', group.vendor);
       setIfPresent(bill, 'subsidiary', group.subsidiary);
-      setIfPresent(bill, TRANSACTION_FIELDS.vendorBill.billType, group.billType);
+      setTransactionFieldByTextOrValue(
+        bill,
+        [TRANSACTION_FIELDS.vendorBill.billType],
+        [group.billTypeText || DEFAULTS.billTypeText],
+        []
+      );
+      setIfPresent(bill, 'currency', group.currency);
+      setIfPresent(bill, 'exchangerate', firstRow.exchangeRate);
       setIfPresent(bill, 'trandate', toDateObject(firstRow.effectiveDate));
       setIfPresent(bill, 'memo', `LCM ${firstRow.memo || ''}`.trim());
     }
@@ -674,12 +876,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     // Bill already having something to allocate onto.
     const costLines = [];
     group.rows.forEach((row) => {
-      const lineType = normalizeChoice(row.billLineTypeText || row.billLineType);
-      if (lineType.indexOf('item') >= 0) {
-        if (addVendorBillItemLine(bill, row)) costLines.push(row);
-      } else {
-        addVendorBillExpenseLine(bill, row);
-      }
+      if (addVendorBillItemLine(bill, row)) costLines.push(row);
     });
 
     // Evaluated after the lines exist; on a new Bill the item sublist is empty up to here.
@@ -687,15 +884,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
     const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
     return makeTransactionResult('Vendor Bill', record.Type.VENDOR_BILL, id, group.createdTransactionId ? 'Appended' : 'Created');
-  }
-
-  function addVendorBillExpenseLine(bill, row) {
-    bill.selectNewLine({ sublistId: 'expense' });
-    setCurrentSublistFieldByValueOrText(bill, 'expense', 'account', [row.expenseAccount], [row.expenseAccountText]);
-    setCurrentIfPresent(bill, 'expense', 'amount', row.amount);
-    setCurrentIfPresent(bill, 'expense', 'memo', row.memo || row.costCategoryText);
-    setClassifications(bill, 'expense', row);
-    bill.commitLine({ sublistId: 'expense' });
   }
 
   function addVendorBillItemLine(bill, row) {
@@ -844,11 +1032,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
         };
       }
       totalsByCategory[categoryKey].amount += row.amount || 0;
-      if (normalizeChoice(row.billLineTypeText || row.billLineType).indexOf('item') >= 0) {
-        totalsByCategory[categoryKey].hasItem = true;
-      } else {
-        totalsByCategory[categoryKey].hasExpense = true;
-      }
+      totalsByCategory[categoryKey].hasItem = true;
     });
 
     Object.keys(totalsByCategory).forEach((costCategoryId) => {
@@ -1138,12 +1322,14 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     items.forEach((item) => {
       const newUnitLandedCost = roundCurrency((item.unitLandedCost || 0) + incrementsByItemId[item.id]);
       const basePoRate = (item.poRate || 0) * (item.exchangeRate || 1);
+      const totalUnitCost = roundCurrency(basePoRate + newUnitLandedCost);
       record.submitFields({
         type: RECORDS.lcmItems,
         id: item.id,
         values: {
           [FIELDS.lcmItems.unitLandedCost]: newUnitLandedCost,
-          [FIELDS.lcmItems.totalUnitCost]: roundCurrency(basePoRate + newUnitLandedCost),
+          [FIELDS.lcmItems.totalUnitCost]: totalUnitCost,
+          [FIELDS.lcmItems.totalValue]: roundCurrency(totalUnitCost * (item.quantity || 0)),
         },
         options: { enableSourcing: true, ignoreMandatoryFields: true },
       });
@@ -1216,8 +1402,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function setClassifications(rec, sublistId, row) {
-    setCurrentIfPresent(rec, sublistId, 'department', row.department);
-    setCurrentIfPresent(rec, sublistId, 'class', row.class);
     setCurrentIfPresent(rec, sublistId, 'location', row.location);
   }
 
@@ -1292,9 +1476,11 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     createTransactions,
     fetchLandedCostRows,
     getAllocationMethodDefault,
+    getCostItemMapDefaults,
     getCostProfileDefaults,
     getVendorBillDefaults,
     getVendorDefaults,
+    listCostCategoryItemMatches,
     normalizeMode,
   };
 });

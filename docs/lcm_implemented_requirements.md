@@ -1,6 +1,6 @@
 # Landed Cost Management - Implemented Requirements
 
-Last updated: 2026-09-01
+Last updated: 2026-09-10
 
 This document tracks implemented behavior for the Landed Cost Management customization. Extend this file chunk by chunk as new requirements are added. For record and field references, see [lcm_record_reference_and_requirements.md](./lcm_record_reference_and_requirements.md).
 
@@ -10,11 +10,11 @@ Users should select Purchase Orders once at the root/header level instead of cho
 
 Implemented behavior:
 
-- Added root field `Vendor` (`custrecord_lcm_vendor`) as the header vendor for PO selection and landed-cost accounting.
+- Added root field `Purchase Order Vendor` (`custrecord_lcm_vendor`) as the header vendor for PO selection only.
 - Added root field `Selected Purchase Orders` (`custrecord_lcm_selected_pos`) as a multi-select Purchase Order field.
-- The root `Subsidiary` field (`custrecord_lcm_subsidiary`) is sourced from the selected vendor and disabled on the form by User Event `beforeLoad`.
+- The root `Subsidiary` field (`custrecord_lcm_subsidiary`) is sourced from the selected Purchase Order Vendor and disabled on the form by User Event `beforeLoad`.
 - The existing child line `PO` field remains as a reference field on `LCM Items`.
-- PO selection is filtered and validated by the root vendor to prevent mixed-vendor LCM records.
+- PO selection is filtered and validated by the root Purchase Order Vendor to prevent mixed-vendor PO selection.
 - PO-sourced child fields are made read-only/disabled by User Event `beforeLoad`.
 - Line-level PO changes are not used to trigger item population.
 
@@ -43,18 +43,22 @@ Current field mapping:
 | PO line item | `custrecord_lcmitems_item` |
 | PO line memo/item text | `custrecord_lcmitems_description` |
 | PO line unit | `custrecord_lcmitems_unit_type` |
-| PO line quantity | `custrecord_lcmitem_ex_receipt` |
-| PO line quantity received | `custrecord_lcmitems_receipt` |
-| Quantity minus received | `custrecord_lcmitems_quantity_remaining` |
-| PO line quantity billed | `custrecord_lcmitems_quantity_bill` |
+| PO remaining receivable quantity | `custrecord_lcmitem_ex_receipt` |
+| Default quantity to receive/bill | `custrecord_lcmitems_receipt` |
+| Expected minus receipt quantity | `custrecord_lcmitems_quantity_remaining` |
+| Derived `full`/`partial` status | `custrecord_lcmitems_bill_status` |
 | PO line exchange rate | `custrecord_lcmitems_exchange_rate` |
 | PO line rate | `custrecord_lcmitems_po_rate` |
+| PO rate x quantity receipt | `custrecord_lcmitems_po_value` |
 | Generated PO line key | `custrecord_lcmitems_source_line_key` |
 | Default unchecked | `custrecord_lcmitems_track_item` |
 
 Implementation detail:
 
-- Vendor is stored as a hidden compatibility/reference value; users select vendor once on the parent record.
+- Item rows are generated only for receivable PO item lines with positive open receipt quantity.
+- `Quantity Receipt` is editable after generation and drives `Bill Status`, `Quantity Remaining`, `PO Value`, allocation quantity, and `Total Value`.
+- The client recalculates derived values immediately in the sublist; `customscript_lcm_items_ue` repeats the calculation on save for inline edits, imports, and non-standard forms.
+- `Quantity Bill` remains only as a hidden legacy field.
 - PO uses the PO internal ID. NetSuite displays the transaction number (`tranid`) to users.
 
 ## 3. Delete/Rebuild Behavior Instead of Dedupe
@@ -99,13 +103,15 @@ Open caveat:
 | Script | Script ID | File | Purpose |
 | --- | --- | --- | --- |
 | PO Lines Suitelet | `customscript_lcm_po_lines_sl` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_lines_suitelet.js` | Returns selected PO item lines to the Client Script as JSON. |
-| PO Selection Client Script | `customscript_lcm_po_selection_cs` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_client.js` | Watches header PO selection, refreshes generated item rows immediately in the UI, exposes form button handlers, and sources Landed Cost row defaults when Vendor/Cost Category changes. The parent LCM deployment is deployed for page/field events, the parent User Event also attaches the module path for custom button functions, and the child Landed Cost deployment is deployed so child record edit/popup pages receive field change events. |
+| PO Selection Client Script | `customscript_lcm_po_selection_cs` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_client.js` | Watches header PO selection, refreshes generated item rows immediately in the UI, exposes form button handlers, and sources Landed Cost row defaults when Vendor/Cost Category mapping changes. The parent LCM deployment is deployed for page/field events, the parent User Event also attaches the module path for custom button functions, and the child Landed Cost deployment is deployed so child record edit/popup pages receive field change events. |
 | PO Selection User Event | `customscript_lcm_po_selection_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_user_event.js` | Attaches the client module, disables line-level PO field, adds buttons, blocks PO selection changes after accounting creation, and performs save-time safety sync when selected POs change. |
+| LCM Items Recalculation User Event | `customscript_lcm_items_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_items_user_event.js` | Recalculates `Quantity Remaining`, `Bill Status`, `PO Value`, and `Total Value` on item-row saves and rejects negative or over-expected receipt quantities. |
 | Accounting Preview/Create Suitelet | `customscript_lcm_accounting_sl` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_accounting_suitelet.js` | Shows Bill/Journal validation preview and performs confirmed transaction creation. |
 | Landed Cost Row Lock User Event | `customscript_lcm_landed_cost_lock_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_landed_cost_lock_user_event.js` | Blocks edits to transaction-driving Landed Cost fields after a row creates accounting. |
+| Cost Category Item Map User Event | `customscript_lcm_cost_item_map_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_cost_item_map_user_event.js` | Names mapping rows from their native LC Cost Category, rejects inactive/missing item mappings, and blocks duplicate active mappings for the same category. |
 | Shared Config | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_config.js` | Central record IDs, field IDs, sublist IDs, and script deployment IDs. |
 | Shared Library | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_lib.js` | PO search, item line transformation, and persisted child row reconcile logic. |
-| Accounting Library | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_accounting_lib.js` | Landed Cost validation, transaction grouping/creation, duplicate blocking, and item cost allocation. |
+| Accounting Library | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_accounting_lib.js` | Landed Cost validation, transaction grouping/creation, duplicate blocking, cost category item mapping, and item cost allocation. |
 
 ## 7. Current Deployment Notes
 
@@ -120,12 +126,12 @@ Open caveat:
 
 - `custrecord_lcmitems_po_line_key` exists on the parent record due to an early failed deployment. It is hidden, relabeled as `Unused PO Line Key`, and not used by scripts.
 - `PO Currency` on `LCM Items` is a Currency amount field, not a Currency list/reference field. Do not map PO currency internal ID into it unless the field is changed or a new reference field is added.
-- PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, `Unit Landed Cost`, and `Total Unit Cost`.
+- PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, editable `Quantity Receipt`, `Unit Landed Cost`, `Total Unit Cost`, and derived values.
 - After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values.
-- Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts source it from SDF-managed child field `custrecord_lcm_lcm_cost_bill_type`.
-- Landed Cost rows inherit Vendor and Subsidiary from the parent record. The line-level Vendor and Subsidiary fields are hidden and retained only as compatibility/reference fields.
-- Users select `LC Cost Profile`; scripts map that profile to hidden native Cost Category and Bill Item references. The profile list values currently assume matching NetSuite native Cost Category and Item names such as `LC - Freight`.
-- The client and child User Event source matching available defaults: Subsidiary, Currency, Exchange Rate, Bill Type, Expense Account, Allocation Method, Cost Category, and Bill Item. Each field is applied independently so one unavailable/invalid account field does not block the remaining defaults.
+- Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts always apply `LC Bill` when Vendor Bills are generated.
+- Landed Cost rows require their own visible `Vendor Name`. Subsidiary, currency, and exchange rate default from that row vendor when possible.
+- Users select `LC Cost Category` from active `LCM Cost Category Item Map` rows. Scripts derive the hidden native Cost Category and Bill Item references from that selected mapping.
+- The client and child User Event source matching available defaults: Subsidiary, Currency, Exchange Rate, fixed hidden Bill Type, fixed hidden Bill Line Type, Expense Account compatibility data, Allocation Method, Cost Category, and Bill Item. Each field is applied independently so one unavailable/invalid account field does not block the remaining defaults.
 
 ## 9. Bill and Journal Creation
 
@@ -133,30 +139,30 @@ Landed Cost rows now drive accounting creation from the `Landed Cost` child subl
 
 Implemented behavior:
 
-- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, selectable Bill Type, LC Cost Profile, hidden vendor/subsidiary/native cost references, currency, Bill line type, hidden expense details, classifications, memo, processing status, and created transaction references.
+- Added `customrecord_lcm_landed_cost` to the SDF project with fields for target type, line-level Vendor Name, fixed hidden LC Bill/item-line settings, mapped LC Cost Category selector, hidden native cost references, editable currency/exchange rate, location, memo, processing status, and created transaction references.
 - Added root record buttons on saved/viewed LCM records:
   - `Create Bill`
   - `Create Journal`
 - Button clicks open a Suitelet preview before any transaction is created.
-- `Create Bill` processes uncreated Landed Cost rows marked `Bill`, grouped by vendor, subsidiary, Bill Type, and currency. NetSuite sources transaction currency from the selected vendor/subsidiary instead of forcing the Landed Cost currency field.
-- Generated Vendor Bills set body field `custbody12` from the Landed Cost row `Bill Type` field.
+- `Create Bill` processes uncreated Landed Cost rows marked `Bill`, grouped by line Vendor Name, subsidiary, and currency. One LCM record can therefore create multiple Vendor Bills for different vendors.
+- Generated Vendor Bills set body field `custbody12` to `LC Bill`.
 - Generated Vendor Bills set Bill `Landed Cost > Cost Allocation Method` from the Landed Cost row `Allocation Method`; the LCM default is `Value`.
-- Bill rows can create either Vendor Bill `expense` lines or `item` lines based on `Bill Line Type`.
+- Bill rows always create Vendor Bill `item` lines. The old `Bill Line Type` field is hidden and fixed to `Item`.
 - Vendor Bill item lines set NetSuite item-line `Landed Cost Category` from the Landed Cost row `Cost Category`. Tagging is unconditional: it is what makes the generated Bill selectable later as an `Other Transaction` landed cost source on the Item Receipt/GRN.
 - The Bill `Landed Cost` subtab per-category `Source`/`Amount` summary is only written when the generated Bill also carries inventory item lines to absorb the cost. A pure freight/duty/insurance Bill has none, so only line tagging plus `Cost Allocation Method` apply there.
 - Both landed cost writes are evaluated after the Bill lines are added. A prior build read the item sublist before adding any line, so a newly created Bill always looked empty and no landed cost was assigned.
 - NetSuite prerequisites for line tagging to take effect. All three must hold, otherwise the Bill still saves and the script logs an audit entry naming the Landed Cost row:
-  - `Bill Line Type` is `Item`. NetSuite `expense` lines cannot carry a Landed Cost Category.
+  - Vendor Bill lines are item lines. NetSuite `expense` lines cannot carry a Landed Cost Category.
   - `Bill Item` is a non-inventory/service/other-charge item. Inventory items are allocation targets, not cost carriers.
   - `Cost Category` is a Cost Category whose type is `Landed Cost`, and the `Landed Cost` feature is enabled at Setup > Company > Enable Features > Items & Inventory.
 - `Create Journal` processes uncreated Landed Cost rows marked `Journal`, grouped by subsidiary and currency, and creates balanced Journal Entries from fixed account constants in `lcm_po_selection_config.js`. Current temporary constants are debit account `1` and credit account `2`; if either account is rejected by NetSuite, the script falls back through active account candidates and uses the first account accepted by the Journal line.
 - If uncreated rows match a group that already has a created Vendor Bill or Journal Entry, the new rows are appended to that existing transaction instead of creating a second transaction.
 - Already-created Landed Cost rows are skipped for line creation and protected from duplicate processing using processing status and created transaction ID.
 - Created Vendor Bill or Journal Entry is stored back on each processed Landed Cost row in the visible `Created Transaction` field and hidden internal ID field.
-- After successful Vendor Bill creation, scripts allocate the Bill landed-cost amount to checked `LCM Items` rows and update `Unit Landed Cost` and `Total Unit Cost`. Journal Entry amounts are not included in this item-cost recalculation.
+- After successful Vendor Bill creation, scripts allocate the Bill landed-cost amount to checked `LCM Items` rows and update `Unit Landed Cost`, `Total Unit Cost`, and `Total Value`. Journal Entry amounts are not included in this item-cost recalculation.
 - Allocation runs once per confirmed create action across all created groups, instead of rewriting every tracked item once per group.
 - Created Landed Cost rows are locked from edits to transaction-driving fields by a child User Event.
-- Selecting a Landed Cost Category attempts to default `Allocation Method` from NetSuite landed cost category metadata, falling back to `Value` if the account-specific native field is not readable.
+- Selecting a mapped Landed Cost Category attempts to default `Allocation Method` from the mapped native NetSuite landed cost category metadata, falling back to `Value` if the account-specific native field is not readable.
 - The root form has `Select All Track Items` in edit/create/copy mode to check all `Track Item` boxes on the Items sublist before creating accounting.
 
 Allocation behavior:
@@ -168,34 +174,37 @@ Allocation behavior:
 - Otherwise, cost is allocated equally across checked item rows.
 - Exchange rate defaults to `1` when blank.
 
-## 10. LC Cost Profile Auto-Sourcing
+## 10. LC Cost Category Mapping and Auto-Sourcing
 
-Selecting `LC Cost Profile` (`custrecord_lcm_lcm_cost_profile`, native Landed Cost Category list `-155`) sources the hidden references behind it.
+Selecting `LC Cost Category` (`custrecord_lcm_lcm_cost_item_map`, `customrecord_lcm_cost_item_map`) sources the hidden native references behind it.
 
-- `LC Cost Item` (`custrecord_lcm_lcm_cost_item`, Item `-10`) is matched to an **active** item whose Name/Number (`itemid`) or Display Name (`displayname`) equals the profile text exactly. Example: profile `LC Advanced Income Tax` resolves to item `1933`.
-- `Cost Category` (`custrecord_lcm_lcm_cost_category`) stores the selected category so generated Vendor Bills can tag the item line.
-- Item search filters on `itemid` then `displayname`. `name` is **not** a searchable field on an item search and raised `invalid field: name` on every lookup; it has been removed.
-- A subitem's `itemid` includes its parent (`Parent : Child`), so a subitem will not match on Name/Number. Give it a Display Name equal to the profile text, or use a top-level item.
+- `LC Cost Item` (`custrecord_lcm_lcm_cost_item`, Item `-10`) is hidden and sourced from the selected `LCM Cost Category Item Map` row.
+- `Cost Category` (`custrecord_lcm_lcm_cost_category`, native Cost Category `-155`) is hidden and sourced from the same mapping row so generated Vendor Bills can tag the item line.
+- Mapping fields are `LC Cost Category` (`custrecord_lcm_ccim_category`, native Cost Category `-155`) and `LC Cost Item` (`custrecord_lcm_ccim_item`, Item `-10`).
+- The mapped item must be active. It should be a non-inventory, service, or other-charge item suitable for Vendor Bill item lines.
+- Active mapping rows are the user-facing options. Inactivating a mapping row removes that option from the Landed Cost sublist.
+- `customscript_lcm_cost_item_map_ue` blocks duplicate active mappings for the same native category and names the mapping record from the selected native category for clean dropdown display.
+- The previous exact-name item fallback is no longer part of the user-facing flow. Categories must be configured in `LCM Cost Category Item Map` before users can select them on Landed Cost rows.
 - `normalizeValue` was called six times in `lcm_accounting_lib.js` without ever being defined, so every `getCostProfileDefaults` call raised `ReferenceError` at runtime. It is now defined.
 
 ### Where sourcing runs
 
 | Path | Script | Runs when | Guarantee |
 | --- | --- | --- | --- |
-| Immediate | `lcm_po_selection_client.js` `fieldChanged`/`pageInit` | User changes LC Cost Profile on the form | Best effort. Depends on the client script loading and the field ids matching the rendered form. |
+| Immediate | `lcm_po_selection_client.js` `fieldChanged`/`pageInit` | User changes mapped LC Cost Category on the form | Best effort. Depends on the client script loading and the field ids matching the rendered form. |
 | Fallback | `lcm_landed_cost_lock_user_event.js` `beforeSubmit` | Create, edit, **and inline edit (XEDIT)** | Guaranteed. Runs regardless of form, field visibility, or whether the client script loaded. |
 
 Inline edit was previously skipped entirely, so rows saved through inline edit or CSV import never received the hidden references. `XEDIT` now runs `sourceCostProfileRefs` only; the full vendor/parent sourcing stays off that path because an inline edit submits only the touched fields.
 
-The client resolves the item through the `costProfileDefaults` Suitelet action rather than its own `N/search`, so the immediate path and the save-time fallback cannot disagree.
+The client resolves the mapping through the `costItemMapDefaults` Suitelet action rather than its own `N/search`, so the immediate path and the save-time fallback cannot disagree. Old rows that still carry only the hidden native category can use `costProfileDefaults` to find the active mapping by category.
 
 ### Diagnostics
 
 `DEBUG` in `lcm_po_selection_config.js` controls two verbose aids. Turn them off once field ids are confirmed.
 
 - `logFormFields` - `beforeLoad` writes `LCM Landed Cost form field inventory` to the execution log for `customscript_lcm_landed_cost_lock_ue`, listing every `custrecord` field on the **rendered** form with its id, label, and type, split into ON FORM / NOT ON FORM. A custom entry form keeps its own layout and overrides the `displaytype` held in SDF, so the object XML cannot be trusted to describe the live form. This is how to find the real field id behind a label.
-- `announceClientLoad` - `pageInit` logs `LCM client script loaded` and alerts if the configured LC Cost Profile field id is absent from the form.
+- `announceClientLoad` - `pageInit` logs `LCM client script loaded` and alerts if the configured LC Cost Category field id is absent from the form.
 
-Every failure path now reports the selected category internal ID, the selected category text, the attempted item name, and the reason. Failures log at `error` level, successes at `audit`.
+Every failure path now reports the selected mapping/category internal ID, selected text, mapping source, mapping record ID, and reason. Failures log at `error` level, successes at `audit`.
 
 `N/log` in a **client** script writes to the browser console, not the NetSuite execution log. Client-side entries will never appear under the script deployment; open browser devtools for those.

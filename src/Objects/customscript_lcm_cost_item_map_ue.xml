@@ -1,0 +1,17 @@
+<usereventscript scriptid="customscript_lcm_cost_item_map_ue">
+    <name>LCM Cost Category Item Map Validation</name>
+    <scriptfile>[/SuiteScripts/landed-cost-management/lcm_cost_item_map_user_event.js]</scriptfile>
+    <isinactive>F</isinactive>
+    <notifyadmins>F</notifyadmins>
+    <notifyowner>F</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_lcm_cost_item_map_ue">
+            <status>RELEASED</status>
+            <recordtype>[customrecord_lcm_cost_item_map]</recordtype>
+            <isdeployed>T</isdeployed>
+            <loglevel>AUDIT</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</usereventscript>

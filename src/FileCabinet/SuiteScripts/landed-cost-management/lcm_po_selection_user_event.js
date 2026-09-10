@@ -18,33 +18,46 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
     orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
+    renameSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
+      { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
+      { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
+      { fieldId: FIELDS.lcmLandedCosts.costItemMap, label: 'LC Cost Category' },
+    ]);
     hideSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
-      FIELDS.lcmLandedCosts.vendor,
+      FIELDS.lcmLandedCosts.parent,
+      FIELDS.lcmLandedCosts.legacyCostVendorName,
+      FIELDS.lcmLandedCosts.billLineType,
+      FIELDS.lcmLandedCosts.billType,
       FIELDS.lcmLandedCosts.subsidiary,
+      FIELDS.lcmLandedCosts.costProfile,
+      FIELDS.lcmLandedCosts.costCategory,
       FIELDS.lcmLandedCosts.expenseAccount,
+      FIELDS.lcmLandedCosts.billItem,
       FIELDS.lcmLandedCosts.debitAccount,
       FIELDS.lcmLandedCosts.creditAccount,
+      FIELDS.lcmLandedCosts.department,
+      FIELDS.lcmLandedCosts.class,
+    ]);
+    hideSublistFields(context.form, SUBLISTS.lcmItems, [
+      FIELDS.lcmItems.quantityBill,
     ]);
     disableSublistFields(context.form, SUBLISTS.lcmItems, [
       FIELDS.lcmItems.purchaseOrder,
       FIELDS.lcmItems.item,
       FIELDS.lcmItems.description,
-      FIELDS.lcmItems.quantityReceipt,
       FIELDS.lcmItems.expectedQuantityReceipt,
       FIELDS.lcmItems.quantityRemaining,
-      FIELDS.lcmItems.quantityBill,
+      FIELDS.lcmItems.billStatus,
       FIELDS.lcmItems.unitType,
       FIELDS.lcmItems.poRate,
+      FIELDS.lcmItems.poValue,
       FIELDS.lcmItems.exchangeRate,
       FIELDS.lcmItems.unitLandedCost,
       FIELDS.lcmItems.totalUnitCost,
+      FIELDS.lcmItems.totalValue,
     ]);
     disableSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
-      FIELDS.lcmLandedCosts.costCategory,
-      FIELDS.lcmLandedCosts.currency,
-      FIELDS.lcmLandedCosts.exchangeRate,
       FIELDS.lcmLandedCosts.allocationMethod,
-      FIELDS.lcmLandedCosts.billItem,
     ]);
 
     if (
@@ -158,7 +171,7 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
     if (selectedPoIds.length && !vendorId) {
       throw error.create({
         name: 'LCM_VENDOR_REQUIRED_FOR_PO',
-        message: 'Select Vendor before selecting Purchase Orders.',
+        message: 'Select Purchase Order Vendor before selecting Purchase Orders.',
         notifyOff: false,
       });
     }
@@ -211,6 +224,28 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
   function hideSublistFields(form, sublistId, fieldIds) {
     updateSublistFieldDisplay(form, sublistId, fieldIds, serverWidget.FieldDisplayType.HIDDEN);
+  }
+
+  function renameSublistFields(form, sublistId, fieldLabels) {
+    try {
+      const sublist = form.getSublist({ id: sublistId });
+      fieldLabels.forEach((fieldLabel) => {
+        try {
+          const field = sublist.getField({ id: fieldLabel.fieldId });
+          field.label = fieldLabel.label;
+        } catch (fieldError) {
+          log.audit({
+            title: 'LCM sublist field label was not changed',
+            details: `${sublistId}.${fieldLabel.fieldId}: ${fieldError.message || fieldError}`,
+          });
+        }
+      });
+    } catch (sublistError) {
+      log.audit({
+        title: 'LCM sublist label changes were not applied',
+        details: `${sublistId}: ${sublistError.message || sublistError}`,
+      });
+    }
   }
 
   function updateSublistFieldDisplay(form, sublistId, fieldIds, displayType) {

@@ -2,7 +2,7 @@
 
 ## Requirement Implemented
 
-Move Vendor and PO selection to the `Landed Cost Management` header. When the header PO multi-select changes, the `LCM Items` subtab is refreshed from selected PO item lines that match the header Vendor. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
+Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. When the header PO multi-select changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines that match the header Purchase Order Vendor and still have open receipt quantity. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
 
 ## NetSuite Records Found
 
@@ -16,7 +16,7 @@ Move Vendor and PO selection to the `Landed Cost Management` header. When the he
 Create these before deploying the scripts:
 
 1. Parent field on `Landed Cost Management`
-   - Label: `Vendor`
+   - Label: `Purchase Order Vendor`
    - ID: `custrecord_lcm_vendor`
    - Type: `List/Record`
    - List/Record: `Vendor`
@@ -27,7 +27,7 @@ Create these before deploying the scripts:
    - ID: `custrecord_lcm_selected_pos`
    - Type: `Multiple Select`
    - List/Record: `Purchase Order`
-   - Filter: `Vendor` equals `custrecord_lcm_vendor`.
+   - Filter: `Purchase Order Vendor` equals `custrecord_lcm_vendor`.
    - Show on form header.
 
 3. Child field on `LCM Items`
@@ -45,11 +45,45 @@ Create these before deploying the scripts:
    - Purpose: line-level flag for future processing work.
 
 5. Child field on `Landed Cost`
-   - Label: `LC Cost Profile`
-   - ID: `custrecord_lcm_lcm_cost_profile`
+   - Label: `LC Cost Category`
+   - ID: `custrecord_lcm_lcm_cost_item_map`
    - Type: `List/Record`
-   - List/Record: `LCM Cost Profile`
-   - Purpose: visible LC-specific selector mapped by script to hidden native Cost Category and Bill Item references.
+   - List/Record: `LCM Cost Category Item Map` (`customrecord_lcm_cost_item_map`)
+   - Purpose: visible mapped-category selector. Active mapping rows are the only user-facing category options.
+
+6. Child field on `LCM Items`
+   - Label: `Bill Status`
+   - ID: `custrecord_lcmitems_bill_status`
+   - Type: `Free-Form Text`
+   - Purpose: `full` when Expected Quantity Receipt equals Quantity Receipt; otherwise `partial`.
+
+7. Child field on `LCM Items`
+   - Label: `PO Value`
+   - ID: `custrecord_lcmitems_po_value`
+   - Type: `Currency`
+   - Purpose: PO Rate multiplied by Quantity Receipt.
+
+8. Child field on `LCM Items`
+   - Label: `Total Value`
+   - ID: `custrecord_lcmitems_total_value`
+   - Type: `Currency`
+   - Purpose: Total Unit Cost multiplied by Quantity Receipt.
+
+9. Child field on `Landed Cost`
+   - Label: `Vendor Name`
+   - ID: `custrecord_lcm_lcm_vendor`
+   - Type: `List/Record`
+   - List/Record: `Vendor`
+   - Mandatory: checked
+   - Purpose: row-level landed-cost vendor used to group and create one or more Vendor Bills from one LCM record.
+
+10. Custom record `LCM Cost Category Item Map`
+   - ID: `customrecord_lcm_cost_item_map`
+   - Purpose: explicit admin mapping from LC Cost Category to LC Cost Item.
+   - Include Name: enabled; mapping User Event auto-names each row from the selected category.
+   - Field: `custrecord_lcm_ccim_category` (`LC Cost Category`, native Cost Category `-155`, mandatory)
+   - Field: `custrecord_lcm_ccim_item` (`LC Cost Item`, Item `-10`, mandatory)
+   - Field: `custrecord_lcm_ccim_memo` (`Memo`, optional)
 
 ## Files
 
@@ -58,6 +92,10 @@ Create these before deploying the scripts:
 - `lcm_po_lines_suitelet.js`
 - `lcm_po_selection_client.js`
 - `lcm_po_selection_user_event.js`
+- `lcm_items_user_event.js`
+- `lcm_accounting_lib.js`
+- `lcm_accounting_suitelet.js`
+- `lcm_cost_item_map_user_event.js`
 
 Upload all files into the same File Cabinet folder so the relative module imports resolve.
 
@@ -72,7 +110,7 @@ Upload all files into the same File Cabinet folder so the relative module import
 2. Client Script
    - File: `lcm_po_selection_client.js`
    - Attach to the `Landed Cost Management` custom record form.
-   - Trigger: `fieldChanged` on `custrecord_lcm_vendor`, `custrecord_lcm_selected_pos`, and `custrecord_lcm_lcm_cost_profile`.
+   - Trigger: `fieldChanged` on `custrecord_lcm_vendor`, `custrecord_lcm_selected_pos`, `custrecord_lcmitems_receipt`, `custrecord_lcm_lcm_vendor`, and `custrecord_lcm_lcm_cost_item_map`.
 
 3. User Event
    - File: `lcm_po_selection_user_event.js`
@@ -80,17 +118,41 @@ Upload all files into the same File Cabinet folder so the relative module import
    - `beforeLoad`: disables sourced parent/sublist fields as read-only references.
    - `afterSubmit`: server-side safety sync and deletion for removed POs.
 
+4. User Event
+   - File: `lcm_items_user_event.js`
+   - Deploy on `CUSTOMRECORD_LCMITEMS`.
+   - `beforeSubmit`: recalculates item derived fields and validates editable `Quantity Receipt`.
+
+5. User Event
+   - File: `lcm_cost_item_map_user_event.js`
+   - Deploy on `CUSTOMRECORD_LCM_COST_ITEM_MAP`.
+   - `beforeSubmit`: auto-names mapping rows, validates active item selection, and blocks duplicate active mappings for the same LC Cost Category.
+
 ## Behavior
 
-On header Vendor/PO change:
+On header Purchase Order Vendor/PO change:
 
-- Source parent Subsidiary from the selected Vendor.
-- Filter/validate selected POs against the header Vendor.
+- Source parent Subsidiary from the selected Purchase Order Vendor.
+- Filter/validate selected POs against the header Purchase Order Vendor.
 - Fetch selected PO item lines through the Suitelet.
+- Exclude closed/non-receivable PO lines and lines whose open receipt quantity is zero or below.
 - Remove existing item subtab rows whose PO is no longer selected.
 - Add missing item rows for newly selected PO lines.
 - Keep existing rows for still-selected POs by matching `PO Line Key`.
-- Keep PO-derived fields as read-only references.
+- Keep PO-derived fields as read-only references, except `Quantity Receipt`, which remains editable.
+- Recalculate `Bill Status`, `Quantity Remaining`, `PO Value`, and `Total Value` when `Quantity Receipt` changes.
+
+On Landed Cost row Vendor Name change:
+
+- Source subsidiary, currency, exchange rate, fixed hidden Bill Type, fixed hidden Bill Line Type, and expense-account compatibility defaults from the selected row vendor where available.
+- Keep Currency and Exchange Rate editable after defaulting.
+
+On Landed Cost row LC Cost Category change:
+
+- The visible selector is `custrecord_lcm_lcm_cost_item_map`, so only active `LCM Cost Category Item Map` rows appear as options.
+- Source hidden native `Cost Category` from the selected mapping row.
+- Resolve hidden `LC Cost Item` from the selected mapping row.
+- If the selected mapping is inactive, missing, or points to an inactive item, leave `LC Cost Item` blank and report the mapping reason.
 
 On save:
 
@@ -99,8 +161,9 @@ On save:
 - Create missing `LCM Items` rows for selected PO lines.
 - Update matched PO-derived fields by `custrecord_lcmitems_source_line_key`.
 - If a just-saved inline child row is missing that hidden key, match it once by PO + Item, write the generated key, and preserve the user's `Track Item` selection.
-- Preserve matched row values that are not sourced from the PO, including `Track Item`, `Unit Landed Cost`, and `Total Unit Cost`.
+- Preserve matched row values that are not sourced from the PO, including `Track Item`, editable `Quantity Receipt`, `Unit Landed Cost`, `Total Unit Cost`, and derived values.
 - Avoid duplicates using `custrecord_lcmitems_source_line_key`.
+- On each `LCM Items` row save, validate that `Quantity Receipt` is not negative or greater than `Expected Quantity Receipt`, then recalculate `Bill Status`, `Quantity Remaining`, `PO Value`, and `Total Value`.
 
 ## Field Mapping
 
@@ -108,12 +171,14 @@ On save:
 - Item -> `custrecord_lcmitems_item`
 - Memo/Item text -> `custrecord_lcmitems_description`
 - Vendor -> `custrecord_lcmitems_vendor` hidden compatibility/reference field
-- PO quantity received -> `custrecord_lcmitems_receipt`
-- PO quantity -> `custrecord_lcmitem_ex_receipt`
-- PO quantity minus received -> `custrecord_lcmitems_quantity_remaining`
-- PO quantity billed -> `custrecord_lcmitems_quantity_bill`
+- PO open receipt quantity -> `custrecord_lcmitem_ex_receipt`
+- Default open receipt quantity -> `custrecord_lcmitems_receipt`
+- Expected minus receipt quantity -> `custrecord_lcmitems_quantity_remaining`
+- Derived full/partial status -> `custrecord_lcmitems_bill_status`
 - Unit -> `custrecord_lcmitems_unit_type`
 - PO rate -> `custrecord_lcmitems_po_rate`
+- PO rate x receipt quantity -> `custrecord_lcmitems_po_value`
+- Total unit cost x receipt quantity -> `custrecord_lcmitems_total_value`
 - Exchange rate -> `custrecord_lcmitems_exchange_rate`
 - Generated key -> `custrecord_lcmitems_source_line_key`
 

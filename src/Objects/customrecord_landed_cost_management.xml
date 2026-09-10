@@ -16,7 +16,7 @@
   <enablekeywords>T</enablekeywords>
   <enablemailmerge>F</enablemailmerge>
   <enablenametranslation>F</enablenametranslation>
-  <enablenumbering>F</enablenumbering>
+  <enablenumbering>T</enablenumbering>
   <enableoptimisticlocking>T</enableoptimisticlocking>
   <enablesystemnotes>T</enablesystemnotes>
   <hierarchical>F</hierarchical>
@@ -27,9 +27,9 @@
   <includename>F</includename>
   <isinactive>F</isinactive>
   <isordered>F</isordered>
-  <numberinginit></numberinginit>
-  <numberingmindigits></numberingmindigits>
-  <numberingprefix></numberingprefix>
+  <numberinginit>1</numberinginit>
+  <numberingmindigits>5</numberingmindigits>
+  <numberingprefix>SHIP-</numberingprefix>
   <numberingsuffix></numberingsuffix>
   <recordname>Landed Cost Management</recordname>
   <showcreationdate>T</showcreationdate>
@@ -51,7 +51,7 @@
       <defaultchecked>F</defaultchecked>
       <defaultselection></defaultselection>
       <defaultvalue></defaultvalue>
-      <description>Header vendor for PO selection and generated landed-cost accounting.</description>
+      <description>Header Purchase Order Vendor for PO selection filtering and validation.</description>
       <displayheight></displayheight>
       <displaytype>NORMAL</displaytype>
       <displaywidth></displaywidth>
@@ -64,7 +64,7 @@
       <isformula>F</isformula>
       <ismandatory>F</ismandatory>
       <isparent>F</isparent>
-      <label>Vendor</label>
+      <label>Purchase Order Vendor</label>
       <linktext></linktext>
       <maxlength></maxlength>
       <maxvalue></maxvalue>
@@ -196,9 +196,9 @@
       <defaultchecked>F</defaultchecked>
       <defaultselection></defaultselection>
       <defaultvalue></defaultvalue>
-      <description>LCM Number</description>
+      <description>Legacy shipment number text field. Shipment numbering now uses custom record auto-numbering.</description>
       <displayheight></displayheight>
-      <displaytype>NORMAL</displaytype>
+      <displaytype>HIDDEN</displaytype>
       <displaywidth></displaywidth>
       <dynamicdefault></dynamicdefault>
       <enabletextenhance>F</enabletextenhance>
@@ -221,7 +221,7 @@
       <searchdefault></searchdefault>
       <searchlevel>2</searchlevel>
       <selectrecordtype></selectrecordtype>
-      <showinlist>T</showinlist>
+      <showinlist>F</showinlist>
       <sourcefilterby></sourcefilterby>
       <sourcefrom></sourcefrom>
       <sourcelist></sourcelist>

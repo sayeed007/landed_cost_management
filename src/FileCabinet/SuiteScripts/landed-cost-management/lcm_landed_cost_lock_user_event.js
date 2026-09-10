@@ -16,15 +16,41 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
   function beforeLoad(context) {
     if (!context.form) return;
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
+    renameBodyFields(context.form, [
+      { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
+      { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
+      { fieldId: FIELDS.lcmLandedCosts.costItemMap, label: 'LC Cost Category' },
+    ]);
     hideBodyFields(context.form, [
-      FIELDS.lcmLandedCosts.vendor,
+      FIELDS.lcmLandedCosts.legacyCostVendorName,
+      FIELDS.lcmLandedCosts.billLineType,
+      FIELDS.lcmLandedCosts.billType,
       FIELDS.lcmLandedCosts.subsidiary,
+      FIELDS.lcmLandedCosts.costProfile,
+      FIELDS.lcmLandedCosts.costCategory,
       FIELDS.lcmLandedCosts.expenseAccount,
+      FIELDS.lcmLandedCosts.billItem,
       FIELDS.lcmLandedCosts.debitAccount,
       FIELDS.lcmLandedCosts.creditAccount,
+      FIELDS.lcmLandedCosts.department,
+      FIELDS.lcmLandedCosts.class,
     ]);
     addServerDebugBanner(context);
     logFormFieldInventory(context);
+  }
+
+  function renameBodyFields(form, fieldLabels) {
+    fieldLabels.forEach((fieldLabel) => {
+      try {
+        const field = form.getField({ id: fieldLabel.fieldId });
+        field.label = fieldLabel.label;
+      } catch (error) {
+        log.audit({
+          title: 'LCM body field label was not changed',
+          details: `${fieldLabel.fieldId}: ${error.message || error}`,
+        });
+      }
+    });
   }
 
   function hideBodyFields(form, fieldIds) {
@@ -52,7 +78,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       field.defaultValue =
         '<div style="margin:8px 0;padding:8px 12px;border:1px solid #b6d7a8;background:#f3fff0;color:#274e13;font:12px Arial,sans-serif;">' +
         'LCM debug: Landed Cost row User Event beforeLoad ran. Client script module path was attached. ' +
-        'Change LC Cost Profile and copy the LCM fieldChanged alert text.' +
+        'Change LC Cost Category and copy the LCM fieldChanged alert text.' +
         '</div>';
     } catch (error) {
       log.error({ title: 'LCM debug banner failed', details: error.message || error });
@@ -90,7 +116,8 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       title: 'LCM Landed Cost form field inventory',
       details:
         `Form: ${getFormIdentity(context)}. ` +
-        `Configured LC Cost Profile: ${FIELDS.lcmLandedCosts.costProfile}. ` +
+        `Configured LC Cost Category mapping: ${FIELDS.lcmLandedCosts.costItemMap}. ` +
+        `Legacy LC Cost Category: ${FIELDS.lcmLandedCosts.costProfile}. ` +
         `Configured LC Cost Item: ${FIELDS.lcmLandedCosts.billItem}. ` +
         `ON FORM -> ${onForm.join(' | ') || 'none'}. ` +
         `NOT ON FORM -> ${notOnForm.join(', ') || 'none'}`,
@@ -151,19 +178,21 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       rec.setText({ fieldId: f.createdDate, text: todayDateText() });
     }
     const parentDefaults = getParentDefaults(rec);
-    setValueIfPresent(rec, f.vendor, parentDefaults.vendor);
-    setValueIfPresent(rec, f.subsidiary, parentDefaults.subsidiary);
     sourceCostProfileRefs(rec);
     sourceAllocationMethodDefault(rec);
+    setTextIfPresent(rec, f.billLineType, config.DEFAULTS.billLineTypeText);
+    setTextIfPresent(rec, f.billType, config.DEFAULTS.billTypeText);
 
     const vendorId = rec.getValue({ fieldId: f.vendor });
-    if (!vendorId) return;
+    if (!vendorId) {
+      setValueIfPresent(rec, f.subsidiary, parentDefaults.subsidiary);
+      return;
+    }
 
     const defaults = accounting.getVendorBillDefaults(vendorId);
     setDefaultIfBlank(rec, f.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
     setDefaultIfBlank(rec, f.currency, defaults.currency, defaults.currencyText);
     setDefaultIfBlank(rec, f.exchangeRate, defaults.exchangeRate);
-    setDefaultIfBlank(rec, f.billType, defaults.billType, defaults.billTypeText);
     setDefaultIfBlank(rec, f.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
   }
 
@@ -192,20 +221,26 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
   function sourceCostProfileRefs(rec) {
     const f = FIELDS.lcmLandedCosts;
     const selectedCategory = getSelectedCostCategory(rec);
-    const profileId = selectedCategory.value;
-    const profileText = selectedCategory.text;
+    const selectedId = selectedCategory.value;
+    const selectedText = selectedCategory.text;
 
-    if (!profileId && !profileText) {
+    if (!selectedId && !selectedText) {
       log.audit({
-        title: 'LCM LC Cost Profile sourcing skipped',
+        title: 'LCM LC Cost Category sourcing skipped',
         details: `No value on ${getCostProfileSourceFieldIds().join(' or ')}. Nothing to resolve an LC Cost Item from.`,
       });
       return;
     }
 
-    const defaults = accounting.getCostProfileDefaults(profileId, profileText);
+    const defaults =
+      selectedCategory.fieldId === f.costItemMap
+        ? accounting.getCostItemMapDefaults(selectedId)
+        : accounting.getCostProfileDefaults(selectedId, selectedText);
     if (!defaults.costCategory && !defaults.costCategoryText) return;
 
+    const mapSet =
+      selectedCategory.fieldId === f.costItemMap ||
+      setValueOrText(rec, f.costItemMap, defaults.costItemMap, defaults.costItemMapText);
     const categorySet =
       selectedCategory.fieldId === f.costCategory ||
       setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
@@ -216,9 +251,11 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
         title: 'LCM LC Cost Item was not written to the record',
         details:
           `Source field: ${selectedCategory.fieldId || '(none)'}. ` +
-          `Cost Profile internal id: ${profileId || '(none)'}. Cost Profile text: "${profileText ||
+          `Selected internal id: ${selectedId || '(none)'}. Selected text: "${selectedText ||
+            defaults.costItemMapText ||
             defaults.costCategoryText}". Attempted item name: "${defaults.attemptedItemName || ''}". ` +
           `Resolved item: ${defaults.billItem || '(none)'}. Target field: ${f.billItem}. ` +
+          `Source: ${defaults.source || '(none)'}. Mapping record: ${defaults.mappingRecordId || '(none)'}. ` +
           `Reason: ${
             defaults.billItem
               ? `field ${f.billItem} rejected the write or does not exist on this record. Check the LCM Landed Cost form field inventory log for the real field id.`
@@ -230,9 +267,11 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
 
     log.audit({
       title: 'LCM LC Cost Item sourced',
-      details: `${selectedCategory.fieldId}=${profileId} ("${defaults.costCategoryText}") -> ${f.billItem}=${
+      details: `${selectedCategory.fieldId}=${selectedId} ("${defaults.costItemMapText || defaults.costCategoryText}") -> ${f.billItem}=${
         defaults.billItem
-      } ("${defaults.billItemText}"). Cost Category written: ${categorySet}.`,
+      } ("${defaults.billItemText}"). Source: ${defaults.source || '(none)'}. Mapping record: ${
+        defaults.mappingRecordId || '(none)'
+      }. Cost Item Map written: ${mapSet}. Cost Category written: ${categorySet}.`,
     });
   }
 
@@ -240,7 +279,11 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     const f = FIELDS.lcmLandedCosts;
     if (rec.getValue({ fieldId: f.allocationMethod })) return;
 
-    const costCategoryId = getValueIfPresent(rec, f.costCategory) || getValueIfPresent(rec, f.costProfile);
+    let costCategoryId = getValueIfPresent(rec, f.costCategory) || getValueIfPresent(rec, f.costProfile);
+    if (!costCategoryId) {
+      const costItemMapId = getValueIfPresent(rec, f.costItemMap);
+      costCategoryId = costItemMapId ? accounting.getCostItemMapDefaults(costItemMapId).costCategory : '';
+    }
     if (!costCategoryId) return;
 
     const defaults = accounting.getAllocationMethodDefault(costCategoryId);
@@ -269,6 +312,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       f.billType,
       f.vendor,
       f.subsidiary,
+      f.costItemMap,
       f.costProfile,
       f.costCategory,
       f.amount,
@@ -280,8 +324,6 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       f.billItem,
       f.debitAccount,
       f.creditAccount,
-      f.department,
-      f.class,
       f.location,
       f.memo,
     ];
@@ -326,9 +368,18 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     }
   }
 
+  function setTextIfPresent(rec, fieldId, text) {
+    if (!text) return;
+    try {
+      rec.setText({ fieldId, text });
+    } catch (error) {
+      // Keep save flow moving if an account-specific list text differs.
+    }
+  }
+
   function getCostProfileSourceFieldIds() {
     const f = FIELDS.lcmLandedCosts;
-    return [f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
+    return [f.costItemMap, f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
   }
 
   function getSelectedCostCategory(rec) {

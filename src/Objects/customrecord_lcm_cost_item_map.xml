@@ -1,0 +1,55 @@
+<customrecordtype scriptid="customrecord_lcm_cost_item_map">
+  <accesstype>CUSTRECORDENTRYPERM</accesstype>
+  <aidescription></aidescription>
+  <allowattachments>F</allowattachments>
+  <allowinlinedeleting>T</allowinlinedeleting>
+  <allowinlinedetaching>T</allowinlinedetaching>
+  <allowinlineediting>T</allowinlineediting>
+  <allowmobileaccess>T</allowmobileaccess>
+  <allownumberingoverride>F</allownumberingoverride>
+  <allowquickadd>T</allowquickadd>
+  <allowquicksearch>T</allowquicksearch>
+  <allowuiaccess>T</allowuiaccess>
+  <customsegment></customsegment>
+  <description>Maps native LC Cost Categories to the item used on generated landed-cost Vendor Bill lines.</description>
+  <enabledle>T</enabledle>
+  <enablekeywords>T</enablekeywords>
+  <enablemailmerge>F</enablemailmerge>
+  <enablenametranslation>F</enablenametranslation>
+  <enablenumbering>F</enablenumbering>
+  <enableoptimisticlocking>T</enableoptimisticlocking>
+  <enablesystemnotes>T</enablesystemnotes>
+  <hierarchical>F</hierarchical>
+  <icon></icon>
+  <iconbuiltin>T</iconbuiltin>
+  <iconindex></iconindex>
+  <includeinsearchmenu>T</includeinsearchmenu>
+  <includename>T</includename>
+  <isinactive>F</isinactive>
+  <isordered>F</isordered>
+  <numberinginit></numberinginit>
+  <numberingmindigits></numberingmindigits>
+  <numberingprefix></numberingprefix>
+  <numberingsuffix></numberingsuffix>
+  <recordname>LCM Cost Category Item Map</recordname>
+  <showcreationdate>F</showcreationdate>
+  <showcreationdateonlist>F</showcreationdateonlist>
+  <showid>F</showid>
+  <showlastmodified>F</showlastmodified>
+  <showlastmodifiedonlist>F</showlastmodifiedonlist>
+  <shownotes>T</shownotes>
+  <showowner>F</showowner>
+  <showownerallowchange>F</showownerallowchange>
+  <showowneronlist>F</showowneronlist>
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_lcm_ccim_category">
+      <accesslevel>2</accesslevel><aidescription></aidescription><allowquickadd>F</allowquickadd><applyformatting>F</applyformatting><checkspelling>F</checkspelling><defaultchecked>F</defaultchecked><defaultselection></defaultselection><defaultvalue></defaultvalue><description>Native NetSuite landed cost category selected on the LCM Landed Cost row.</description><displayheight></displayheight><displaytype>NORMAL</displaytype><displaywidth></displaywidth><dynamicdefault></dynamicdefault><enabletextenhance>F</enabletextenhance><encryptatrest>F</encryptatrest><fieldtype>SELECT</fieldtype><globalsearch>F</globalsearch><help></help><isformula>F</isformula><ismandatory>T</ismandatory><isparent>F</isparent><label>LC Cost Category</label><linktext></linktext><maxlength></maxlength><maxvalue></maxvalue><minvalue></minvalue><onparentdelete>NO_ACTION</onparentdelete><parentsubtab></parentsubtab><rolerestrict>F</rolerestrict><searchcomparefield></searchcomparefield><searchdefault></searchdefault><searchlevel>2</searchlevel><selectrecordtype>-155</selectrecordtype><showinlist>T</showinlist><sourcefilterby></sourcefilterby><sourcefrom></sourcefrom><sourcelist></sourcelist><storevalue>T</storevalue><subtab></subtab>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_lcm_ccim_item">
+      <accesslevel>2</accesslevel><aidescription></aidescription><allowquickadd>F</allowquickadd><applyformatting>F</applyformatting><checkspelling>F</checkspelling><defaultchecked>F</defaultchecked><defaultselection></defaultselection><defaultvalue></defaultvalue><description>Active non-inventory, service, or other-charge item used on generated Vendor Bill item lines.</description><displayheight></displayheight><displaytype>NORMAL</displaytype><displaywidth></displaywidth><dynamicdefault></dynamicdefault><enabletextenhance>F</enabletextenhance><encryptatrest>F</encryptatrest><fieldtype>SELECT</fieldtype><globalsearch>F</globalsearch><help></help><isformula>F</isformula><ismandatory>T</ismandatory><isparent>F</isparent><label>LC Cost Item</label><linktext></linktext><maxlength></maxlength><maxvalue></maxvalue><minvalue></minvalue><onparentdelete>NO_ACTION</onparentdelete><parentsubtab></parentsubtab><rolerestrict>F</rolerestrict><searchcomparefield></searchcomparefield><searchdefault></searchdefault><searchlevel>2</searchlevel><selectrecordtype>-10</selectrecordtype><showinlist>T</showinlist><sourcefilterby></sourcefilterby><sourcefrom></sourcefrom><sourcelist></sourcelist><storevalue>T</storevalue><subtab></subtab>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_lcm_ccim_memo">
+      <accesslevel>2</accesslevel><aidescription></aidescription><allowquickadd>F</allowquickadd><applyformatting>F</applyformatting><checkspelling>T</checkspelling><defaultchecked>F</defaultchecked><defaultselection></defaultselection><defaultvalue></defaultvalue><description>Optional implementation note for the mapping.</description><displayheight></displayheight><displaytype>NORMAL</displaytype><displaywidth></displaywidth><dynamicdefault></dynamicdefault><enabletextenhance>F</enabletextenhance><encryptatrest>F</encryptatrest><fieldtype>TEXTAREA</fieldtype><globalsearch>F</globalsearch><help></help><isformula>F</isformula><ismandatory>F</ismandatory><isparent>F</isparent><label>Memo</label><linktext></linktext><maxlength></maxlength><maxvalue></maxvalue><minvalue></minvalue><onparentdelete></onparentdelete><parentsubtab></parentsubtab><rolerestrict>F</rolerestrict><searchcomparefield></searchcomparefield><searchdefault></searchdefault><searchlevel>2</searchlevel><selectrecordtype></selectrecordtype><showinlist>T</showinlist><sourcefilterby></sourcefilterby><sourcefrom></sourcefrom><sourcelist></sourcelist><storevalue>T</storevalue><subtab></subtab>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>
