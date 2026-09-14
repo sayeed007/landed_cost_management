@@ -23,14 +23,15 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 ## Current Business Rules
 
 - Header `custrecord_lcm_vendor` is the Purchase Order Vendor used to filter and validate selected POs.
+- Header `custrecord_lcm_selected_pos` is the stored selected PO list; users should populate it through the `Select Receivable POs` Suitelet so fully received/non-receivable POs are not selectable in normal UX.
 - Root record shipment numbering should use NetSuite custom record auto-numbering; the old text field `custrecord_lcm_shipment_number` is legacy compatibility only.
 - `LCM Items` should include only PO item lines that are receivable and still have remaining quantity to receive.
 - `Expected Quantity Receipt` means PO quantity still open for receipt.
 - `Quantity Receipt` is editable and means the quantity to receive and bill through this LCM record.
 - `Quantity Remaining` is expected receipt quantity minus current quantity receipt.
 - `Bill Status` is `full` when expected quantity equals receipt quantity, otherwise `partial`.
-- `PO Value` is `PO Rate * Quantity Receipt`.
-- `Total Value` is `Total Unit Cost * Quantity Receipt`.
+- `PO Value` is `PO Rate * PO Exchange Rate * Quantity Receipt`, so it is comparable with base-currency landed-cost allocation.
+- `Total Value` is `Total Unit Cost * Quantity Receipt`; `Total Unit Cost` already includes converted PO rate plus allocated landed cost.
 - `Quantity Bill` is no longer user-facing.
 - Each Landed Cost row must have its own `Vendor Name`; bills are grouped by that vendor so one LCM record can create multiple Vendor Bills.
 - Landed Cost `Bill Line Type` is always `Item` and should be hidden.

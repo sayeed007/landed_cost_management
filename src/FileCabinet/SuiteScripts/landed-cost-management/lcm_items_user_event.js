@@ -31,7 +31,11 @@ define(['N/error', './lcm_po_selection_config'], (error, config) => {
 
     setValueIfPresent(rec, f.quantityRemaining, Math.max(0, expectedQuantity - quantityReceipt));
     setValueIfPresent(rec, f.billStatus, expectedQuantity === quantityReceipt ? 'full' : 'partial');
-    setValueIfPresent(rec, f.poValue, roundCurrency((toNumber(getValue(rec, f.poRate)) || 0) * quantityReceipt));
+    setValueIfPresent(
+      rec,
+      f.poValue,
+      roundCurrency((toNumber(getValue(rec, f.poRate)) || 0) * (toNumber(getValue(rec, f.exchangeRate)) || 1) * quantityReceipt)
+    );
     setValueIfPresent(
       rec,
       f.totalValue,

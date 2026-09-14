@@ -14,7 +14,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | SDF object | `src/Objects/customrecord_landed_cost_management.xml` |
 | Purpose | Header/root record for landed cost processing. It stores LC, port, incoterm, selected PO context, and owns child item and landed-cost rows. Shipment numbering is record auto-numbered. |
 | UI tabs | `Items`, `Landed Cost`, plus standard notes/files tabs |
-| Main customization added | Header-level `Selected Purchase Orders` multi-select supports the generated `LCM Items` child sublist. |
+| Main customization added | Header-level receivable PO selector supports the generated `LCM Items` child sublist. |
 
 ### Root Field Reference
 
@@ -42,7 +42,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | LC Cover Note No. | `custrecord_lc_cover_note_no` | Text | LC cover note number. |
 | IRC NO. | `custrecord_lcm_irc_no` | Text | IRC reference number. |
 | Air/ Vassel Name | `custrecord_lcm_air_vassel_name` | Text | Vessel/air carrier name. Existing label spelling is `Vassel`. |
-| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Header-level PO selector filtered/validated by Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
+| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which only lists POs that have at least one receivable open item line for the selected Purchase Order Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
 | Unused PO Line Key | `custrecord_lcmitems_po_line_key` | Hidden text | Accidental parent-scoped field from an early deployment attempt. It is hidden and not used by scripts. Correct child line key is `custrecord_lcmitems_source_line_key`. |
 
 ## 2. Child Custom Record: LCM Items
@@ -72,13 +72,14 @@ This document is the working record and field reference for the Landed Cost Mana
 | Quantity Remaining | `custrecord_lcmitems_quantity_remaining` | Text | Computed as Expected Quantity Receipt minus Quantity Receipt. |
 | Quantity Bill | `custrecord_lcmitems_quantity_bill` | Currency | Deprecated hidden field. Removed from the user-facing Items sublist. |
 | Bill Status | `custrecord_lcmitems_bill_status` | Text | `full` when Expected Quantity Receipt equals Quantity Receipt; otherwise `partial`. |
-| PO Currency | `custrecord_lcmitems_po_currency` | Currency | Existing field labelled PO Currency. Current scripts do not populate this with a currency record because the field type is Currency amount, not List/Record Currency. |
+| PO Currency | `custrecord_lcmitems_po_currency_text` | Text | PO transaction currency text. Replaces the old amount-type `custrecord_lcmitems_po_currency` field in the user-facing sublist. |
+| Legacy PO Currency Amount | `custrecord_lcmitems_po_currency` | Hidden currency amount | Deprecated amount-type field. It could not display currency names and is hidden from the user-facing Items sublist. |
 | Exchange Rate | `custrecord_lcmitems_exchange_rate` | Text | Exchange rate from the PO line/header search result. |
 | PO Rate | `custrecord_lcmitems_po_rate` | Currency | PO line rate. |
-| PO Value | `custrecord_lcmitems_po_value` | Currency | PO Rate multiplied by editable Quantity Receipt. |
+| PO Value | `custrecord_lcmitems_po_value` | Currency | PO Rate multiplied by PO Exchange Rate and editable Quantity Receipt. Stored in base currency for allocation comparison. |
 | Unit Landed Cost | `custrecord_lcmitems_unit_landed_cost` | Currency | Result field for Bill landed-cost allocation per unit. Journal Entry amounts are not included in this calculation. |
-| Total Unit Cost | `custrecord_lcmitems_total_unit_cost` | Currency | Result field for PO rate plus Bill allocated landed cost per unit. Journal Entry amounts are not included in this calculation. |
-| Total Value | `custrecord_lcmitems_total_value` | Currency | Total Unit Cost multiplied by editable Quantity Receipt. |
+| Total Unit Cost | `custrecord_lcmitems_total_unit_cost` | Currency | Result field for converted PO rate plus Bill allocated landed cost per unit. Journal Entry amounts are not included in this calculation. |
+| Total Value | `custrecord_lcmitems_total_value` | Currency | Total Unit Cost multiplied by editable Quantity Receipt. Stored in base currency. |
 | Hidden LCM Item | `custrecord_lcm_lcm_hidden_lcm_item` | Parent select to `customrecord_landed_cost_management` | Parent-child link back to the root Landed Cost Management record. This creates the `Items` child sublist. |
 | PO Line Key | `custrecord_lcmitems_source_line_key` | Hidden text | Internal generated key from PO ID and PO line unique key. Used as a persisted trace/debug key. Current UI refresh clears and rebuilds lines, so it is not used as the primary duplicate prevention mechanism. |
 

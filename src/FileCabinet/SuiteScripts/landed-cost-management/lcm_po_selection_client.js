@@ -16,6 +16,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     if (syncing) return;
     syncing = true;
     try {
+      exposeWindowCallbacks();
       announceClientLoad(currentRecord.get());
       syncCostProfileDefaults(currentRecord.get(), '');
     } catch (error) {
@@ -323,6 +324,7 @@ ${defaults.reason || ''}`
       FIELDS.lcmItems.quantityReceipt,
       FIELDS.lcmItems.expectedQuantityReceipt,
       FIELDS.lcmItems.poRate,
+      FIELDS.lcmItems.exchangeRate,
       FIELDS.lcmItems.totalUnitCost,
     ].indexOf(fieldId) >= 0;
   }
@@ -332,6 +334,7 @@ ${defaults.reason || ''}`
     const expectedQuantity = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.expectedQuantityReceipt)) || 0;
     const quantityReceipt = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.quantityReceipt)) || 0;
     const poRate = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.poRate)) || 0;
+    const exchangeRate = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.exchangeRate)) || 1;
     const totalUnitCost = toNumber(getCurrentSublistValue(rec, sublistId, FIELDS.lcmItems.totalUnitCost)) || 0;
 
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityRemaining, Math.max(0, expectedQuantity - quantityReceipt));
@@ -341,7 +344,7 @@ ${defaults.reason || ''}`
       FIELDS.lcmItems.billStatus,
       expectedQuantity === quantityReceipt ? 'full' : 'partial'
     );
-    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poValue, roundCurrency(poRate * quantityReceipt));
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poValue, roundCurrency(poRate * exchangeRate * quantityReceipt));
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.totalValue, roundCurrency(totalUnitCost * quantityReceipt));
   }
 
@@ -547,6 +550,59 @@ ${defaults.reason || ''}`
     window.open(suiteletUrl, '_blank');
   }
 
+  function openReceivablePoSelector() {
+    exposeWindowCallbacks();
+    const rec = currentRecord.get();
+    const vendorId = safeGetValue(rec, FIELDS.landedCostManagement.vendor);
+    if (!vendorId) {
+      window.alert('Select Purchase Order Vendor before selecting Purchase Orders.');
+      return;
+    }
+
+    const selectedPoIds = normalizeIds(
+      rec.getValue({ fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders })
+    );
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.poSelectorSuitelet.scriptId,
+      deploymentId: SCRIPTS.poSelectorSuitelet.deploymentId,
+      params: {
+        vendorId,
+        selectedPoIds: selectedPoIds.join(','),
+      },
+    });
+
+    window.open(
+      suiteletUrl,
+      'lcmReceivablePoSelector',
+      'width=980,height=720,resizable=yes,scrollbars=yes'
+    );
+  }
+
+  function applyReceivablePoSelection(poIdsInput) {
+    const poIds = normalizeIds(poIdsInput);
+    const rec = currentRecord.get();
+
+    syncing = true;
+    try {
+      rec.setValue({
+        fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders,
+        value: poIds,
+        ignoreFieldChange: true,
+      });
+      syncItemSublist(rec);
+    } catch (error) {
+      log.error({ title: 'LCM receivable PO selection failed', details: error });
+      window.alert(`Unable to apply selected receivable PO(s): ${error.message || error}`);
+    } finally {
+      syncing = false;
+    }
+  }
+
+  function exposeWindowCallbacks() {
+    if (typeof window === 'undefined') return;
+    window.lcmApplyReceivablePoSelection = applyReceivablePoSelection;
+  }
+
   function syncItemSublist(rec) {
     const selectedPoIds = normalizeIds(
       rec.getValue({ fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders })
@@ -599,6 +655,7 @@ ${defaults.reason || ''}`
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityRemaining, poLine.quantityRemaining);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.billStatus, poLine.billStatus);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.unitType, poLine.unitType);
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poCurrencyText, poLine.poCurrencyText);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poRate, poLine.poRate);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poValue, poLine.poValue);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.exchangeRate, poLine.exchangeRate);
@@ -778,5 +835,12 @@ ${defaults.reason || ''}`
     }
   }
 
-  return { pageInit, fieldChanged, openLcmAccountingPreview, selectAllLcmTrackItems };
+  return {
+    pageInit,
+    fieldChanged,
+    openReceivablePoSelector,
+    applyReceivablePoSelection,
+    openLcmAccountingPreview,
+    selectAllLcmTrackItems,
+  };
 });

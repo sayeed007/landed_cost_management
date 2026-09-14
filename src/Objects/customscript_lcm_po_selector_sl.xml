@@ -1,0 +1,17 @@
+<suitelet scriptid="customscript_lcm_po_selector_sl">
+    <name>LCM Receivable PO Selector Suitelet</name>
+    <scriptfile>[/SuiteScripts/landed-cost-management/lcm_po_selector_suitelet.js]</scriptfile>
+    <isinactive>F</isinactive>
+    <notifyadmins>F</notifyadmins>
+    <notifyowner>F</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_lcm_po_selector_sl">
+            <title>LCM Receivable PO Selector Suitelet</title>
+            <status>RELEASED</status>
+            <isdeployed>T</isdeployed>
+            <loglevel>AUDIT</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</suitelet>

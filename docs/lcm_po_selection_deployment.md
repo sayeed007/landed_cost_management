@@ -2,7 +2,7 @@
 
 ## Requirement Implemented
 
-Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. When the header PO multi-select changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines that match the header Purchase Order Vendor and still have open receipt quantity. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
+Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. Users choose POs through the `Select Receivable POs` Suitelet button, which only lists Purchase Orders that match the header Purchase Order Vendor and have at least one receivable open item line. The selected IDs are stored in the header PO multi-select. When that selection changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
 
 ## NetSuite Records Found
 
@@ -28,7 +28,8 @@ Create these before deploying the scripts:
    - Type: `Multiple Select`
    - List/Record: `Purchase Order`
    - Filter: `Purchase Order Vendor` equals `custrecord_lcm_vendor`.
-   - Show on form header.
+   - Show on form header as a read-only stored selection field.
+   - Users populate this through the `Select Receivable POs` button instead of directly opening the native multi-select options.
 
 3. Child field on `LCM Items`
    - Label: `PO Line Key`
@@ -61,7 +62,7 @@ Create these before deploying the scripts:
    - Label: `PO Value`
    - ID: `custrecord_lcmitems_po_value`
    - Type: `Currency`
-   - Purpose: PO Rate multiplied by Quantity Receipt.
+   - Purpose: PO Rate multiplied by PO Exchange Rate and Quantity Receipt.
 
 8. Child field on `LCM Items`
    - Label: `Total Value`
@@ -69,7 +70,13 @@ Create these before deploying the scripts:
    - Type: `Currency`
    - Purpose: Total Unit Cost multiplied by Quantity Receipt.
 
-9. Child field on `Landed Cost`
+9. Child field on `LCM Items`
+   - Label: `PO Currency`
+   - ID: `custrecord_lcmitems_po_currency_text`
+   - Type: `Free-Form Text`
+   - Purpose: visible PO transaction currency text.
+
+10. Child field on `Landed Cost`
    - Label: `Vendor Name`
    - ID: `custrecord_lcm_lcm_vendor`
    - Type: `List/Record`
@@ -77,7 +84,7 @@ Create these before deploying the scripts:
    - Mandatory: checked
    - Purpose: row-level landed-cost vendor used to group and create one or more Vendor Bills from one LCM record.
 
-10. Custom record `LCM Cost Category Item Map`
+11. Custom record `LCM Cost Category Item Map`
    - ID: `customrecord_lcm_cost_item_map`
    - Purpose: explicit admin mapping from LC Cost Category to LC Cost Item.
    - Include Name: enabled; mapping User Event auto-names each row from the selected category.
@@ -90,6 +97,7 @@ Create these before deploying the scripts:
 - `lcm_po_selection_config.js`
 - `lcm_po_selection_lib.js`
 - `lcm_po_lines_suitelet.js`
+- `lcm_po_selector_suitelet.js`
 - `lcm_po_selection_client.js`
 - `lcm_po_selection_user_event.js`
 - `lcm_items_user_event.js`
@@ -107,23 +115,32 @@ Upload all files into the same File Cabinet folder so the relative module import
    - Deployment ID: `customdeploy_lcm_po_lines_sl`
    - Audience: same users who edit Landed Cost Management.
 
-2. Client Script
+2. Suitelet
+   - File: `lcm_po_selector_suitelet.js`
+   - Script ID: `customscript_lcm_po_selector_sl`
+   - Deployment ID: `customdeploy_lcm_po_selector_sl`
+   - Audience: same users who edit Landed Cost Management.
+   - Purpose: lists only eligible receivable POs for the current Purchase Order Vendor and applies the checked selection back to `custrecord_lcm_selected_pos`.
+
+3. Client Script
    - File: `lcm_po_selection_client.js`
    - Attach to the `Landed Cost Management` custom record form.
    - Trigger: `fieldChanged` on `custrecord_lcm_vendor`, `custrecord_lcm_selected_pos`, `custrecord_lcmitems_receipt`, `custrecord_lcm_lcm_vendor`, and `custrecord_lcm_lcm_cost_item_map`.
-
-3. User Event
-   - File: `lcm_po_selection_user_event.js`
-   - Deploy on `CUSTOMRECORD_LANDED_COST_MANAGEMENT`.
-   - `beforeLoad`: disables sourced parent/sublist fields as read-only references.
-   - `afterSubmit`: server-side safety sync and deletion for removed POs.
+   - Button handler: `openReceivablePoSelector()` opens the selector Suitelet.
+   - Popup callback: `applyReceivablePoSelection()` writes selected IDs to `custrecord_lcm_selected_pos` and refreshes the item sublist.
 
 4. User Event
+   - File: `lcm_po_selection_user_event.js`
+   - Deploy on `CUSTOMRECORD_LANDED_COST_MANAGEMENT`.
+   - `beforeLoad`: disables sourced parent/sublist fields as read-only references and adds `Select Receivable POs`.
+   - `afterSubmit`: server-side safety sync and deletion for removed POs.
+
+5. User Event
    - File: `lcm_items_user_event.js`
    - Deploy on `CUSTOMRECORD_LCMITEMS`.
    - `beforeSubmit`: recalculates item derived fields and validates editable `Quantity Receipt`.
 
-5. User Event
+6. User Event
    - File: `lcm_cost_item_map_user_event.js`
    - Deploy on `CUSTOMRECORD_LCM_COST_ITEM_MAP`.
    - `beforeSubmit`: auto-names mapping rows, validates active item selection, and blocks duplicate active mappings for the same LC Cost Category.
@@ -133,7 +150,10 @@ Upload all files into the same File Cabinet folder so the relative module import
 On header Purchase Order Vendor/PO change:
 
 - Source parent Subsidiary from the selected Purchase Order Vendor.
-- Filter/validate selected POs against the header Purchase Order Vendor.
+- Open the `Select Receivable POs` picker from the parent form.
+- List only Purchase Orders that have at least one receivable item line with positive open receipt quantity.
+- Apply checked eligible PO IDs into the stored `Selected Purchase Orders` field.
+- Validate selected POs against the header Purchase Order Vendor.
 - Fetch selected PO item lines through the Suitelet.
 - Exclude closed/non-receivable PO lines and lines whose open receipt quantity is zero or below.
 - Remove existing item subtab rows whose PO is no longer selected.
@@ -141,6 +161,8 @@ On header Purchase Order Vendor/PO change:
 - Keep existing rows for still-selected POs by matching `PO Line Key`.
 - Keep PO-derived fields as read-only references, except `Quantity Receipt`, which remains editable.
 - Recalculate `Bill Status`, `Quantity Remaining`, `PO Value`, and `Total Value` when `Quantity Receipt` changes.
+- `PO Value` is recalculated in base currency as `PO Rate * PO Exchange Rate * Quantity Receipt`.
+- `Total Value` is recalculated in base currency as `Total Unit Cost * Quantity Receipt`.
 
 On Landed Cost row Vendor Name change:
 
@@ -177,13 +199,14 @@ On save:
 - Derived full/partial status -> `custrecord_lcmitems_bill_status`
 - Unit -> `custrecord_lcmitems_unit_type`
 - PO rate -> `custrecord_lcmitems_po_rate`
-- PO rate x receipt quantity -> `custrecord_lcmitems_po_value`
+- PO currency text -> `custrecord_lcmitems_po_currency_text`
+- PO rate x PO exchange rate x receipt quantity -> `custrecord_lcmitems_po_value`
 - Total unit cost x receipt quantity -> `custrecord_lcmitems_total_value`
 - Exchange rate -> `custrecord_lcmitems_exchange_rate`
 - Generated key -> `custrecord_lcmitems_source_line_key`
 
 ## Notes
 
-The existing `PO Currency` field is configured as a Currency amount field, not a List/Record Currency field, so the scripts do not populate it with the PO currency internal ID. If this should show the PO currency, change/add a List/Record Currency field and add it to the mapping.
+The original `PO Currency` field (`custrecord_lcmitems_po_currency`) is configured as a Currency amount field, not a List/Record Currency field. It is hidden as legacy metadata. Visible PO currency text is stored in `custrecord_lcmitems_po_currency_text`.
 
 If the child sublist is not editable through `currentRecord`, keep the User Event deployed; the item lines will still be corrected after save, but the immediate on-change UX will need a custom Suitelet form or an editable child-record sublist configuration.

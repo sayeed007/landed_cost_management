@@ -52,8 +52,8 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return Math.max(0, expected - receiving);
   }
 
-  function getLineValue(unitCost, quantityReceipt) {
-    return roundCurrency((toNumber(unitCost) || 0) * (toNumber(quantityReceipt) || 0));
+  function getLineValue(unitCost, quantityReceipt, exchangeRate) {
+    return roundCurrency((toNumber(unitCost) || 0) * (toNumber(exchangeRate) || 1) * (toNumber(quantityReceipt) || 0));
   }
 
   function isReceivableItemType(itemTypeValue, itemTypeText) {
@@ -182,6 +182,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
         'quantityshiprecv',
         'rate',
         'unit',
+        'currency',
         'exchangerate',
         'lineuniquekey',
         itemTypeColumn,
@@ -201,6 +202,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       const itemTypeValue = String(result.getValue(itemTypeColumn) || '');
       const itemTypeText = String(result.getText(itemTypeColumn) || '');
       const poRate = toNumber(result.getValue({ name: 'rate' }));
+      const exchangeRate = String(result.getValue({ name: 'exchangerate' }) || '');
 
       if ((expectedQuantityReceipt || 0) <= 0) {
         lineIndex += 1;
@@ -227,9 +229,10 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
         quantityRemaining: 0,
         billStatus: 'full',
         poRate,
-        poValue: getLineValue(poRate, expectedQuantityReceipt),
+        poValue: getLineValue(poRate, expectedQuantityReceipt, exchangeRate),
+        poCurrencyText: String(result.getText({ name: 'currency' }) || result.getValue({ name: 'currency' }) || ''),
         unitType: String(result.getText({ name: 'unit' }) || result.getValue({ name: 'unit' }) || ''),
-        exchangeRate: String(result.getValue({ name: 'exchangerate' }) || ''),
+        exchangeRate,
         lineUniqueKey,
         poLineKey: makeLineKey(poId, lineUniqueKey, itemId, lineIndex),
       });
@@ -239,6 +242,84 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     });
 
     return rows;
+  }
+
+  function listReceivablePurchaseOrders(vendorIdInput) {
+    const vendorId = normalizeVendorId(vendorIdInput);
+    if (!vendorId) return [];
+
+    const optionsByPoId = {};
+    const optionOrder = [];
+    const itemTypeColumn = search.createColumn({ name: 'type', join: 'item' });
+    const poSearch = search.create({
+      type: search.Type.PURCHASE_ORDER,
+      filters: appendVendorFilter(
+        [
+          ['mainline', 'is', 'F'],
+          'AND',
+          ['taxline', 'is', 'F'],
+          'AND',
+          ['shipping', 'is', 'F'],
+          'AND',
+          ['closed', 'is', 'F'],
+          'AND',
+          ['item', 'noneof', '@NONE@'],
+        ],
+        vendorId
+      ),
+      columns: [
+        search.createColumn({ name: 'trandate', sort: search.Sort.DESC }),
+        'internalid',
+        'tranid',
+        'entity',
+        'status',
+        'quantity',
+        'quantityshiprecv',
+        itemTypeColumn,
+      ],
+    });
+
+    poSearch.run().each((result) => {
+      const quantity = toNumber(result.getValue({ name: 'quantity' }));
+      const alreadyReceived = toNumber(result.getValue({ name: 'quantityshiprecv' }));
+      const expectedQuantityReceipt =
+        quantity === null ? null : quantity - (alreadyReceived === null ? 0 : alreadyReceived);
+      const itemTypeValue = String(result.getValue(itemTypeColumn) || '');
+      const itemTypeText = String(result.getText(itemTypeColumn) || '');
+
+      if ((expectedQuantityReceipt || 0) <= 0 || !isReceivableItemType(itemTypeValue, itemTypeText)) {
+        return true;
+      }
+
+      const poId = String(result.getValue({ name: 'internalid' }) || '');
+      if (!poId) return true;
+
+      if (!optionsByPoId[poId]) {
+        optionsByPoId[poId] = {
+          poId,
+          poNumber: String(result.getValue({ name: 'tranid' }) || poId),
+          vendorId: String(result.getValue({ name: 'entity' }) || ''),
+          vendorText: String(result.getText({ name: 'entity' }) || ''),
+          transactionDate: String(result.getValue({ name: 'trandate' }) || ''),
+          status: String(result.getText({ name: 'status' }) || result.getValue({ name: 'status' }) || ''),
+          receivableLineCount: 0,
+          receivableQuantity: 0,
+        };
+        optionOrder.push(poId);
+      }
+
+      optionsByPoId[poId].receivableLineCount += 1;
+      optionsByPoId[poId].receivableQuantity = roundQuantity(
+        optionsByPoId[poId].receivableQuantity + (expectedQuantityReceipt || 0)
+      );
+      return true;
+    });
+
+    return optionOrder.map((poId) => optionsByPoId[poId]);
+  }
+
+  function roundQuantity(value) {
+    return Math.round((Number(value) || 0) * 100000) / 100000;
   }
 
   function eachExistingLcmItem(parentId, callback) {
@@ -280,6 +361,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           quantityRemaining: toNumber(result.getValue({ name: FIELDS.lcmItems.quantityRemaining })),
           billStatus: String(result.getValue({ name: FIELDS.lcmItems.billStatus }) || ''),
           unitType: String(result.getValue({ name: FIELDS.lcmItems.unitType }) || ''),
+          poCurrencyText: '',
           poRate: toNumber(result.getValue({ name: FIELDS.lcmItems.poRate })),
           poValue: toNumber(result.getValue({ name: FIELDS.lcmItems.poValue })),
           exchangeRate: String(result.getValue({ name: FIELDS.lcmItems.exchangeRate }) || ''),
@@ -311,6 +393,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     setIfPresent(rec, FIELDS.lcmItems.quantityRemaining, poLine.quantityRemaining);
     setIfPresent(rec, FIELDS.lcmItems.billStatus, poLine.billStatus);
     setIfPresent(rec, FIELDS.lcmItems.unitType, poLine.unitType);
+    setIfPresent(rec, FIELDS.lcmItems.poCurrencyText, poLine.poCurrencyText);
     setIfPresent(rec, FIELDS.lcmItems.poRate, poLine.poRate);
     setIfPresent(rec, FIELDS.lcmItems.poValue, poLine.poValue);
     setIfPresent(rec, FIELDS.lcmItems.exchangeRate, poLine.exchangeRate);
@@ -345,8 +428,9 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       getBillStatus(poLine.expectedQuantityReceipt, quantityReceipt)
     );
     setChangedValue(values, FIELDS.lcmItems.unitType, existingRow.unitType, poLine.unitType);
+    setChangedValue(values, FIELDS.lcmItems.poCurrencyText, existingRow.poCurrencyText, poLine.poCurrencyText);
     setChangedValue(values, FIELDS.lcmItems.poRate, existingRow.poRate, poLine.poRate);
-    setChangedValue(values, FIELDS.lcmItems.poValue, existingRow.poValue, getLineValue(poLine.poRate, quantityReceipt));
+    setChangedValue(values, FIELDS.lcmItems.poValue, existingRow.poValue, getLineValue(poLine.poRate, quantityReceipt, poLine.exchangeRate));
     setChangedValue(
       values,
       FIELDS.lcmItems.totalValue,
@@ -479,6 +563,78 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     };
   }
 
+  function recalculatePersistedItemValues(parentId) {
+    if (!parentId) return { updatedCount: 0 };
+
+    const rows = [];
+    const poIds = [];
+    eachExistingLcmItem(parentId, (row) => {
+      rows.push(row);
+      if (row.poId) poIds.push(row.poId);
+    });
+
+    const poCurrencyTextById = fetchPoCurrencyTexts(uniqueIds(poIds));
+    let updatedCount = 0;
+
+    rows.forEach((row) => {
+      const quantityReceipt = row.quantityReceipt || 0;
+      const values = {};
+      const poCurrencyText = poCurrencyTextById[row.poId] || row.poCurrencyText || '';
+
+      setChangedValue(values, FIELDS.lcmItems.poCurrencyText, row.poCurrencyText, poCurrencyText);
+      setChangedValue(values, FIELDS.lcmItems.poValue, row.poValue, getLineValue(row.poRate, quantityReceipt, row.exchangeRate));
+      setChangedValue(values, FIELDS.lcmItems.totalValue, row.totalValue, getLineValue(row.totalUnitCost, quantityReceipt));
+
+      if (!Object.keys(values).length) return;
+
+      record.submitFields({
+        type: RECORDS.lcmItems,
+        id: row.id,
+        values,
+        options: { enableSourcing: true, ignoreMandatoryFields: true },
+      });
+      updatedCount += 1;
+    });
+
+    return { updatedCount };
+  }
+
+  function fetchPoCurrencyTexts(poIds) {
+    const currencyById = {};
+    if (!poIds.length) return currencyById;
+
+    search
+      .create({
+        type: search.Type.PURCHASE_ORDER,
+        filters: [
+          ['internalid', 'anyof', poIds],
+          'AND',
+          ['mainline', 'is', 'T'],
+        ],
+        columns: ['internalid', 'currency'],
+      })
+      .run()
+      .each((result) => {
+        const poId = String(result.getValue({ name: 'internalid' }) || '');
+        currencyById[poId] = String(result.getText({ name: 'currency' }) || result.getValue({ name: 'currency' }) || '');
+        return true;
+      });
+
+    return currencyById;
+  }
+
+  function uniqueIds(values) {
+    const seen = {};
+    const ids = [];
+    values.forEach((value) => {
+      const id = normalizeComparable(value).trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    });
+    return ids;
+  }
+
   function takeExistingRowWithoutKey(rowsWithoutKey, poLine) {
     for (let index = 0; index < rowsWithoutKey.length; index += 1) {
       const row = rowsWithoutKey[index];
@@ -520,6 +676,8 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     fetchPurchaseOrderItemLines,
     getVendorDefaults,
     hasCreatedAccountingRows,
+    listReceivablePurchaseOrders,
+    recalculatePersistedItemValues,
     syncPersistedItems,
     validatePurchaseOrderVendor,
   };

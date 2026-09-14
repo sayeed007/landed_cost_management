@@ -13,8 +13,10 @@ Implemented behavior:
 - Added root field `Purchase Order Vendor` (`custrecord_lcm_vendor`) as the header vendor for PO selection only.
 - Added root field `Selected Purchase Orders` (`custrecord_lcm_selected_pos`) as a multi-select Purchase Order field.
 - The root `Subsidiary` field (`custrecord_lcm_subsidiary`) is sourced from the selected Purchase Order Vendor and disabled on the form by User Event `beforeLoad`.
+- The root `Selected Purchase Orders` field is disabled on the form and populated through the `Select Receivable POs` Suitelet button.
 - The existing child line `PO` field remains as a reference field on `LCM Items`.
 - PO selection is filtered and validated by the root Purchase Order Vendor to prevent mixed-vendor PO selection.
+- The selector Suitelet only lists purchase orders with at least one eligible receivable item line, so fully received or otherwise non-receivable POs are excluded before the user can choose them.
 - PO-sourced child fields are made read-only/disabled by User Event `beforeLoad`.
 - Line-level PO changes are not used to trigger item population.
 
@@ -47,16 +49,17 @@ Current field mapping:
 | Default quantity to receive/bill | `custrecord_lcmitems_receipt` |
 | Expected minus receipt quantity | `custrecord_lcmitems_quantity_remaining` |
 | Derived `full`/`partial` status | `custrecord_lcmitems_bill_status` |
+| PO transaction currency text | `custrecord_lcmitems_po_currency_text` |
 | PO line exchange rate | `custrecord_lcmitems_exchange_rate` |
 | PO line rate | `custrecord_lcmitems_po_rate` |
-| PO rate x quantity receipt | `custrecord_lcmitems_po_value` |
+| PO rate x exchange rate x quantity receipt | `custrecord_lcmitems_po_value` |
 | Generated PO line key | `custrecord_lcmitems_source_line_key` |
 | Default unchecked | `custrecord_lcmitems_track_item` |
 
 Implementation detail:
 
 - Item rows are generated only for receivable PO item lines with positive open receipt quantity.
-- `Quantity Receipt` is editable after generation and drives `Bill Status`, `Quantity Remaining`, `PO Value`, allocation quantity, and `Total Value`.
+- `Quantity Receipt` is editable after generation and drives `Bill Status`, `Quantity Remaining`, converted `PO Value`, allocation quantity, and `Total Value`.
 - The client recalculates derived values immediately in the sublist; `customscript_lcm_items_ue` repeats the calculation on save for inline edits, imports, and non-standard forms.
 - `Quantity Bill` remains only as a hidden legacy field.
 - PO uses the PO internal ID. NetSuite displays the transaction number (`tranid`) to users.
@@ -103,8 +106,9 @@ Open caveat:
 | Script | Script ID | File | Purpose |
 | --- | --- | --- | --- |
 | PO Lines Suitelet | `customscript_lcm_po_lines_sl` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_lines_suitelet.js` | Returns selected PO item lines to the Client Script as JSON. |
+| Receivable PO Selector Suitelet | `customscript_lcm_po_selector_sl` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selector_suitelet.js` | Opens from the parent LCM form and lists only Purchase Orders with receivable open item lines for the selected Purchase Order Vendor. Applies checked IDs back to `custrecord_lcm_selected_pos`. |
 | PO Selection Client Script | `customscript_lcm_po_selection_cs` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_client.js` | Watches header PO selection, refreshes generated item rows immediately in the UI, exposes form button handlers, and sources Landed Cost row defaults when Vendor/Cost Category mapping changes. The parent LCM deployment is deployed for page/field events, the parent User Event also attaches the module path for custom button functions, and the child Landed Cost deployment is deployed so child record edit/popup pages receive field change events. |
-| PO Selection User Event | `customscript_lcm_po_selection_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_user_event.js` | Attaches the client module, disables line-level PO field, adds buttons, blocks PO selection changes after accounting creation, and performs save-time safety sync when selected POs change. |
+| PO Selection User Event | `customscript_lcm_po_selection_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_user_event.js` | Attaches the client module, disables direct editing of the stored selected PO field and line-level PO field, adds selector/action buttons, blocks PO selection changes after accounting creation, and performs save-time safety sync when selected POs change. |
 | LCM Items Recalculation User Event | `customscript_lcm_items_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_items_user_event.js` | Recalculates `Quantity Remaining`, `Bill Status`, `PO Value`, and `Total Value` on item-row saves and rejects negative or over-expected receipt quantities. |
 | Accounting Preview/Create Suitelet | `customscript_lcm_accounting_sl` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_accounting_suitelet.js` | Shows Bill/Journal validation preview and performs confirmed transaction creation. |
 | Landed Cost Row Lock User Event | `customscript_lcm_landed_cost_lock_ue` | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_landed_cost_lock_user_event.js` | Blocks edits to transaction-driving Landed Cost fields after a row creates accounting. |
@@ -125,7 +129,7 @@ Open caveat:
 ## 8. Known Notes and Cleanup Items
 
 - `custrecord_lcmitems_po_line_key` exists on the parent record due to an early failed deployment. It is hidden, relabeled as `Unused PO Line Key`, and not used by scripts.
-- `PO Currency` on `LCM Items` is a Currency amount field, not a Currency list/reference field. Do not map PO currency internal ID into it unless the field is changed or a new reference field is added.
+- The old `PO Currency` field (`custrecord_lcmitems_po_currency`) is a Currency amount field, not a Currency list/reference field, so it is hidden. The visible PO currency value is stored as text in `custrecord_lcmitems_po_currency_text`.
 - PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, editable `Quantity Receipt`, `Unit Landed Cost`, `Total Unit Cost`, and derived values.
 - After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values.
 - Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts always apply `LC Bill` when Vendor Bills are generated.
@@ -160,6 +164,7 @@ Implemented behavior:
 - Already-created Landed Cost rows are skipped for line creation and protected from duplicate processing using processing status and created transaction ID.
 - Created Vendor Bill or Journal Entry is stored back on each processed Landed Cost row in the visible `Created Transaction` field and hidden internal ID field.
 - After successful Vendor Bill creation, scripts allocate the Bill landed-cost amount to checked `LCM Items` rows and update `Unit Landed Cost`, `Total Unit Cost`, and `Total Value`. Journal Entry amounts are not included in this item-cost recalculation.
+- Landed Cost row amounts are converted to base currency with `Amount * Exchange Rate` before item allocation. PO rates are also converted with the PO exchange rate before value-based weighting and before `Total Unit Cost` is calculated.
 - Allocation runs once per confirmed create action across all created groups, instead of rewriting every tracked item once per group.
 - Created Landed Cost rows are locked from edits to transaction-driving fields by a child User Event.
 - Selecting a mapped Landed Cost Category attempts to default `Allocation Method` from the mapped native NetSuite landed cost category metadata, falling back to `Value` if the account-specific native field is not readable.

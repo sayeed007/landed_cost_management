@@ -16,7 +16,9 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
 
+    recalculatePersistedItemValues(context);
     orderHeaderFields(context.form);
+    disableBodyField(context.form, FIELDS.landedCostManagement.selectedPurchaseOrders);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
     renameSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
@@ -39,6 +41,7 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
       FIELDS.lcmLandedCosts.class,
     ]);
     hideSublistFields(context.form, SUBLISTS.lcmItems, [
+      FIELDS.lcmItems.poCurrency,
       FIELDS.lcmItems.quantityBill,
     ]);
     disableSublistFields(context.form, SUBLISTS.lcmItems, [
@@ -49,6 +52,7 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
       FIELDS.lcmItems.quantityRemaining,
       FIELDS.lcmItems.billStatus,
       FIELDS.lcmItems.unitType,
+      FIELDS.lcmItems.poCurrencyText,
       FIELDS.lcmItems.poRate,
       FIELDS.lcmItems.poValue,
       FIELDS.lcmItems.exchangeRate,
@@ -65,6 +69,13 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
       context.type === context.UserEventType.COPY ||
       context.type === context.UserEventType.EDIT
     ) {
+      if (!isPoSelectionLocked(context)) {
+        context.form.addButton({
+          id: 'custpage_lcm_select_receivable_pos',
+          label: 'Select Receivable POs',
+          functionName: 'openReceivablePoSelector()',
+        });
+      }
       context.form.addButton({
         id: 'custpage_lcm_select_all_track_items',
         label: 'Select All Track Items',
@@ -185,6 +196,35 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
   function normalizeValue(value) {
     if (Array.isArray(value)) return value.map(String).sort().join(',');
     return String(value === null || value === undefined ? '' : value);
+  }
+
+  function isPoSelectionLocked(context) {
+    if (!context.newRecord.id) return false;
+    try {
+      return lib.hasCreatedAccountingRows(context.newRecord.id);
+    } catch (error) {
+      log.audit({
+        title: 'LCM PO selector lock check failed',
+        details: error.message || error,
+      });
+      return false;
+    }
+  }
+
+  function recalculatePersistedItemValues(context) {
+    if (!context.newRecord.id) return;
+    if (context.type !== context.UserEventType.VIEW && context.type !== context.UserEventType.EDIT) return;
+    try {
+      const summary = lib.recalculatePersistedItemValues(context.newRecord.id);
+      if (summary.updatedCount) {
+        log.audit({ title: 'LCM item derived values recalculated before load', details: summary });
+      }
+    } catch (error) {
+      log.audit({
+        title: 'LCM item derived value recalculation skipped',
+        details: error.message || error,
+      });
+    }
   }
 
   function orderHeaderFields(form) {

@@ -29,6 +29,8 @@ define([], () => {
       quantityBill: 'custrecord_lcmitems_quantity_bill',
       billStatus: 'custrecord_lcmitems_bill_status',
       unitType: 'custrecord_lcmitems_unit_type',
+      poCurrency: 'custrecord_lcmitems_po_currency',
+      poCurrencyText: 'custrecord_lcmitems_po_currency_text',
       poRate: 'custrecord_lcmitems_po_rate',
       poValue: 'custrecord_lcmitems_po_value',
       unitLandedCost: 'custrecord_lcmitems_unit_landed_cost',
@@ -89,6 +91,10 @@ define([], () => {
     poLinesSuitelet: {
       scriptId: 'customscript_lcm_po_lines_sl',
       deploymentId: 'customdeploy_lcm_po_lines_sl',
+    },
+    poSelectorSuitelet: {
+      scriptId: 'customscript_lcm_po_selector_sl',
+      deploymentId: 'customdeploy_lcm_po_selector_sl',
     },
     accountingSuitelet: {
       scriptId: 'customscript_lcm_accounting_sl',
