@@ -69,13 +69,12 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
       context.type === context.UserEventType.COPY ||
       context.type === context.UserEventType.EDIT
     ) {
-      if (!isPoSelectionLocked(context)) {
-        context.form.addButton({
-          id: 'custpage_lcm_select_receivable_pos',
-          label: 'Select Receivable POs',
-          functionName: 'openReceivablePoSelector()',
-        });
-      }
+      const poSelectionLocked = isPoSelectionLocked(context);
+      context.form.addButton({
+        id: 'custpage_lcm_select_receivable_pos',
+        label: 'Select Receivable POs',
+        functionName: poSelectionLocked ? 'showPoSelectionLockedMessage()' : 'openReceivablePoSelector()',
+      });
       context.form.addButton({
         id: 'custpage_lcm_select_all_track_items',
         label: 'Select All Track Items',

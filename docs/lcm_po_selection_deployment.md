@@ -154,6 +154,7 @@ On header Purchase Order Vendor/PO change:
 - List only Purchase Orders that have at least one receivable item line with positive open receipt quantity.
 - Apply checked eligible PO IDs into the stored `Selected Purchase Orders` field.
 - Validate selected POs against the header Purchase Order Vendor.
+- If any Landed Cost row already created a Bill or Journal Entry, keep the selector button visible but show the lock reason instead of opening the picker.
 - Fetch selected PO item lines through the Suitelet.
 - Exclude closed/non-receivable PO lines and lines whose open receipt quantity is zero or below.
 - Remove existing item subtab rows whose PO is no longer selected.

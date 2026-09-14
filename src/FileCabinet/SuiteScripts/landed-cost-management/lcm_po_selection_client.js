@@ -578,6 +578,12 @@ ${defaults.reason || ''}`
     );
   }
 
+  function showPoSelectionLockedMessage() {
+    window.alert(
+      'Selected Purchase Orders cannot be changed after any Landed Cost row has created a Bill or Journal Entry.'
+    );
+  }
+
   function applyReceivablePoSelection(poIdsInput) {
     const poIds = normalizeIds(poIdsInput);
     const rec = currentRecord.get();
@@ -839,6 +845,7 @@ ${defaults.reason || ''}`
     pageInit,
     fieldChanged,
     openReceivablePoSelector,
+    showPoSelectionLockedMessage,
     applyReceivablePoSelection,
     openLcmAccountingPreview,
     selectAllLcmTrackItems,

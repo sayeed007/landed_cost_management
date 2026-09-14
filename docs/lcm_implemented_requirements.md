@@ -131,7 +131,7 @@ Open caveat:
 - `custrecord_lcmitems_po_line_key` exists on the parent record due to an early failed deployment. It is hidden, relabeled as `Unused PO Line Key`, and not used by scripts.
 - The old `PO Currency` field (`custrecord_lcmitems_po_currency`) is a Currency amount field, not a Currency list/reference field, so it is hidden. The visible PO currency value is stored as text in `custrecord_lcmitems_po_currency_text`.
 - PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, editable `Quantity Receipt`, `Unit Landed Cost`, `Total Unit Cost`, and derived values.
-- After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values.
+- After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values. The `Select Receivable POs` button remains visible in edit mode and shows the lock reason instead of opening the selector.
 - Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts always apply `LC Bill` when Vendor Bills are generated.
 - Landed Cost rows require their own visible `Vendor Name`. Subsidiary, currency, and exchange rate default from that row vendor when possible.
 - Users select `LC Cost Category` from active `LCM Cost Category Item Map` rows. Scripts derive the hidden native Cost Category and Bill Item references from that selected mapping.
