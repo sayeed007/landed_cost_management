@@ -36,8 +36,17 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       FIELDS.lcmLandedCosts.department,
       FIELDS.lcmLandedCosts.class,
     ]);
+    applyBeforeLoadDefaults(context);
     addServerDebugBanner(context);
     logFormFieldInventory(context);
+  }
+
+  function applyBeforeLoadDefaults(context) {
+    if (context.type !== context.UserEventType.CREATE && context.type !== context.UserEventType.COPY) return;
+
+    const f = FIELDS.lcmLandedCosts;
+    setFormDefaultText(context, f.targetType, config.DEFAULTS.targetTypeText);
+    setFormDefaultValue(context, f.effectiveDate, new Date());
   }
 
   function renameBodyFields(form, fieldLabels) {
@@ -66,6 +75,48 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
         });
       }
     });
+  }
+
+  function setFormDefaultValue(context, fieldId, value) {
+    if (value === null || value === undefined || value === '') return;
+    try {
+      if (!context.newRecord.getValue({ fieldId })) {
+        context.newRecord.setValue({ fieldId, value });
+      }
+    } catch (recordError) {
+      // Keep trying the rendered form default below.
+    }
+
+    try {
+      const field = context.form.getField({ id: fieldId });
+      field.defaultValue = Object.prototype.toString.call(value) === '[object Date]' ? format.format({ value, type: format.Type.DATE }) : value;
+    } catch (formError) {
+      log.audit({
+        title: 'LCM form default value was not applied',
+        details: `${fieldId}: ${formError.message || formError}`,
+      });
+    }
+  }
+
+  function setFormDefaultText(context, fieldId, text) {
+    if (!text) return;
+    try {
+      if (!context.newRecord.getValue({ fieldId })) {
+        context.newRecord.setText({ fieldId, text });
+      }
+    } catch (recordError) {
+      // Keep trying the rendered form default below.
+    }
+
+    try {
+      const field = context.form.getField({ id: fieldId });
+      field.defaultValue = text;
+    } catch (formError) {
+      log.audit({
+        title: 'LCM form default text was not applied',
+        details: `${fieldId}: ${formError.message || formError}`,
+      });
+    }
   }
 
   function addServerDebugBanner(context) {

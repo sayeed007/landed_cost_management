@@ -2,8 +2,9 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', './lcm_po_selection_lib'], (
+define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', './lcm_po_selection_lib'], (
   error,
+  format,
   log,
   serverWidget,
   config,
@@ -67,6 +68,7 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
     disableSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       FIELDS.lcmLandedCosts.allocationMethod,
     ]);
+    setSublistFieldDefault(context.form, SUBLISTS.lcmLandedCosts, FIELDS.lcmLandedCosts.effectiveDate, todayDateText());
 
     if (
       context.type === context.UserEventType.CREATE ||
@@ -268,6 +270,27 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
 
   function disableSublistFields(form, sublistId, fieldIds) {
     updateSublistFieldDisplay(form, sublistId, fieldIds, serverWidget.FieldDisplayType.DISABLED);
+  }
+
+  function setSublistFieldDefault(form, sublistId, fieldId, value) {
+    if (!value) return;
+    try {
+      const sublist = form.getSublist({ id: sublistId });
+      const field = sublist.getField({ id: fieldId });
+      field.defaultValue = value;
+    } catch (error) {
+      log.audit({
+        title: 'LCM sublist field default was not applied',
+        details: `${sublistId}.${fieldId}: ${error.message || error}`,
+      });
+    }
+  }
+
+  function todayDateText() {
+    return format.format({
+      value: new Date(),
+      type: format.Type.DATE,
+    });
   }
 
   function hideSublistFields(form, sublistId, fieldIds) {
