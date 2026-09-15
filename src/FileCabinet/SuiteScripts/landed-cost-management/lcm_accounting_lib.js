@@ -736,7 +736,8 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       };
       return billDefaults;
     } catch (error) {
-    return defaults;
+      return defaults;
+    }
   }
 
   function getVendorCurrencyDefaults(vendorId, currencyId, subsidiaryId) {
@@ -818,7 +819,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function isChecked(value) {
     return value === true || value === 'T' || value === 'true';
-  }
   }
 
   function lookupFirstVendorField(vendorId, fieldIds) {
