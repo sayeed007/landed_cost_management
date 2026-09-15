@@ -31,6 +31,15 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return value === null || value === undefined ? '' : String(value);
   }
 
+  function normalizeIds(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(String).filter(Boolean);
+    return String(value)
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+
   function normalizeChoice(value) {
     return String(value || '')
       .toLowerCase()
@@ -51,6 +60,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       allocationTargetCount: 0,
       eligibleRows: [],
       skippedRows: [],
+      unallocatedCreatedRows: [],
       errors: [],
       groups: [],
     };
@@ -74,11 +84,14 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     rows.forEach((row) => {
       if (row.isCreated) {
         createdRows.push(row);
+        if (mode === MODES.bill && !row.costAllocatedInGrn) {
+          preview.unallocatedCreatedRows.push(row);
+        }
         preview.skippedRows.push({
           id: row.id,
           reason: `Already created: ${row.createdTransactionType || 'Transaction'} ${
             row.transactionNumber || row.createdTransactionId || ''
-          }`,
+          }${mode === MODES.bill && !row.costAllocatedInGrn ? '; pending landed-cost allocation' : ''}`,
         });
         return;
       }
@@ -92,12 +105,12 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       preview.eligibleRows.push(row);
     });
 
-    if (mode === MODES.bill && preview.eligibleRows.length && !trackedItems.length) {
+    if (mode === MODES.bill && (preview.eligibleRows.length || preview.unallocatedCreatedRows.length) && !trackedItems.length) {
       preview.errors.push('At least one LCM Item row must have Track Item checked before creating accounting.');
     }
 
     preview.groups = groupRows(preview.eligibleRows, mode, createdRows);
-    preview.ok = preview.errors.length === 0 && preview.eligibleRows.length > 0;
+    preview.ok = preview.errors.length === 0 && (preview.eligibleRows.length > 0 || preview.unallocatedCreatedRows.length > 0);
     return preview;
   }
 
@@ -111,6 +124,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
     const created = [];
     const createdRows = [];
+    let allocatedRowCount = 0;
     preview.groups.forEach((group) => {
       const transaction =
         preview.mode === MODES.bill ? createVendorBill(group) : createJournalEntry(group);
@@ -119,8 +133,10 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       created.push(transaction);
     });
     if (preview.mode === MODES.bill) {
-      allocateCreatedCosts(parentId, createdRows);
-      markCostRowsAllocated(createdRows);
+      const rowsForAllocation = getCreatedBillRows(parentId);
+      allocateCreatedCosts(parentId, rowsForAllocation, { reset: true });
+      markCostRowsAllocated(rowsForAllocation);
+      allocatedRowCount = rowsForAllocation.length;
     }
 
     return {
@@ -128,7 +144,64 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       modeText: preview.modeText,
       created,
       processedRowCount: preview.eligibleRows.length,
+      allocatedRowCount,
       skippedRows: preview.skippedRows,
+      allocationTargetCount: preview.allocationTargetCount,
+    };
+  }
+
+  function buildAllocationPreview(parentId) {
+    const preview = {
+      ok: false,
+      mode: 'allocation',
+      modeText: 'Landed Cost Recalculation',
+      parentId: String(parentId || ''),
+      allocationTargetCount: 0,
+      createdBillRows: [],
+      unallocatedCreatedRows: [],
+      errors: [],
+    };
+
+    if (!preview.parentId) {
+      preview.errors.push('Missing Landed Cost Management record ID.');
+      return preview;
+    }
+
+    assertParentAccessible(preview.parentId);
+    preview.createdBillRows = getCreatedBillRows(parentId);
+    preview.unallocatedCreatedRows = preview.createdBillRows.filter((row) => !row.costAllocatedInGrn);
+    preview.allocationTargetCount = fetchTrackedItems(parentId).length;
+
+    if (!preview.createdBillRows.length) {
+      preview.errors.push('No created Vendor Bill landed-cost rows are available for allocation.');
+    }
+    if (!preview.allocationTargetCount) {
+      preview.errors.push('At least one LCM Item row must have Track Item checked before recalculating landed cost.');
+    }
+
+    preview.ok = preview.errors.length === 0;
+    return preview;
+  }
+
+  function recalculateAllocatedCosts(parentId) {
+    const preview = buildAllocationPreview(parentId);
+    if (!preview.ok) {
+      const error = new Error(preview.errors.join('\n') || 'No created Bill rows to allocate.');
+      error.preview = preview;
+      throw error;
+    }
+
+    allocateCreatedCosts(parentId, preview.createdBillRows, { reset: true });
+    markCostRowsAllocated(preview.createdBillRows);
+
+    return {
+      mode: preview.mode,
+      modeText: preview.modeText,
+      created: [],
+      processedRowCount: 0,
+      allocatedRowCount: preview.createdBillRows.length,
+      pendingAllocatedRowCount: preview.unallocatedCreatedRows.length,
+      skippedRows: [],
       allocationTargetCount: preview.allocationTargetCount,
     };
   }
@@ -179,6 +252,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       f.processingStatus,
       f.createdTransactionId,
       f.createdTransactionType,
+      f.costAllocatedInGrn,
     ];
     const rows = [];
 
@@ -239,12 +313,20 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           processingStatus: status,
           createdTransactionId,
           createdTransactionType: getValue(result, f.createdTransactionType),
+          costAllocatedInGrn: isChecked(getValue(result, f.costAllocatedInGrn)),
           isCreated: normalizeChoice(status) === normalizeChoice(STATUS.created) || Boolean(createdTransactionId),
         });
         return true;
       });
 
     return rows.map((row) => enrichRow(row, parentDefaults));
+  }
+
+  function getCreatedBillRows(parentId) {
+    return fetchLandedCostRows(parentId).filter((row) => {
+      const transactionType = normalizeChoice(row.createdTransactionType);
+      return row.isCreated && (row.targetMode === MODES.bill || transactionType.indexOf('vendorbill') >= 0 || transactionType === 'bill');
+    });
   }
 
   function getParentAccountingDefaults(parentId) {
@@ -654,8 +736,89 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       };
       return billDefaults;
     } catch (error) {
-      return defaults;
+    return defaults;
+  }
+
+  function getVendorCurrencyDefaults(vendorId, currencyId, subsidiaryId) {
+    const defaults = getVendorDefaults(vendorId);
+    if (!vendorId || !currencyId) return { exchangeRate: '' };
+
+    try {
+      const bill = record.create({ type: record.Type.VENDOR_BILL, isDynamic: false });
+      setIfPresent(bill, 'entity', vendorId);
+      setIfPresent(bill, 'subsidiary', subsidiaryId || defaults.subsidiary);
+      setIfPresent(bill, 'currency', currencyId);
+      return {
+        currency: getRecordValue(bill, 'currency') || String(currencyId),
+        currencyText: getRecordText(bill, 'currency'),
+        exchangeRate: getRecordValue(bill, 'exchangerate') || '1',
+      };
+    } catch (error) {
+      log.audit({
+        title: 'LCM vendor currency defaults unavailable',
+        details: `${vendorId}/${currencyId}: ${error.message || error}`,
+      });
+      return {
+        currency: String(currencyId),
+        currencyText: '',
+        exchangeRate: '',
+      };
     }
+  }
+
+  function getSelectedPurchaseOrderDefaults(poIdsInput) {
+    const poIds = normalizeIds(poIdsInput);
+    const headerLocations = lookupPurchaseOrderLocations(poIds, true);
+    const lineLocations = lookupPurchaseOrderLocations(poIds, false);
+
+    for (let index = 0; index < poIds.length; index += 1) {
+      const poId = poIds[index];
+      if (headerLocations[poId] && headerLocations[poId].location) return headerLocations[poId];
+      if (lineLocations[poId] && lineLocations[poId].location) return lineLocations[poId];
+    }
+
+    return { location: '', locationText: '' };
+  }
+
+  function lookupPurchaseOrderLocations(poIds, mainline) {
+    const locationsByPoId = {};
+    if (!poIds.length) return locationsByPoId;
+
+    try {
+      search
+        .create({
+          type: search.Type.PURCHASE_ORDER,
+          filters: [
+            ['internalid', 'anyof', poIds],
+            'AND',
+            ['mainline', 'is', mainline ? 'T' : 'F'],
+          ],
+          columns: ['internalid', 'location'],
+        })
+        .run()
+        .each((result) => {
+          const poId = normalizeValue(result.getValue({ name: 'internalid' }));
+          const location = normalizeValue(result.getValue({ name: 'location' }));
+          if (!poId || (locationsByPoId[poId] && locationsByPoId[poId].location)) return true;
+          locationsByPoId[poId] = {
+            location,
+            locationText: normalizeValue(result.getText({ name: 'location' })),
+          };
+          return true;
+        });
+    } catch (error) {
+      log.audit({
+        title: `LCM selected PO ${mainline ? 'header' : 'line'} location lookup failed`,
+        details: error.message || error,
+      });
+    }
+
+    return locationsByPoId;
+  }
+
+  function isChecked(value) {
+    return value === true || value === 'T' || value === 'true';
+  }
   }
 
   function lookupFirstVendorField(vendorId, fieldIds) {
@@ -768,7 +931,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
   function validateRow(row, mode) {
     const errors = [];
-    if (!row.targetTypeText && !row.targetType) errors.push('Target Type is required');
+    if (!row.targetTypeText && !row.targetType) errors.push('Document Type is required');
     if (!row.amount || row.amount <= 0) errors.push('Amount is required and must be greater than zero');
     if (!row.subsidiary) errors.push('Subsidiary is required');
     if (mode === MODES.bill) {
@@ -1349,9 +1512,10 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return ids;
   }
 
-  function allocateCreatedCosts(parentId, rows) {
+  function allocateCreatedCosts(parentId, rows, options) {
     const allocatableRows = (rows || []).filter((row) => row.targetMode === MODES.bill);
     if (!allocatableRows.length) return;
+    const reset = Boolean(options && options.reset);
 
     const items = fetchTrackedItems(parentId);
     if (!items.length) throw new Error('No tracked LCM Items are available for landed-cost allocation.');
@@ -1374,7 +1538,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     });
 
     items.forEach((item) => {
-      const newUnitLandedCost = roundCurrency((item.unitLandedCost || 0) + incrementsByItemId[item.id]);
+      const newUnitLandedCost = roundCurrency((reset ? 0 : item.unitLandedCost || 0) + incrementsByItemId[item.id]);
       const basePoRate = (item.poRate || 0) * (item.exchangeRate || 1);
       const totalUnitCost = roundCurrency(basePoRate + newUnitLandedCost);
       record.submitFields({
@@ -1527,14 +1691,18 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     MODES,
     STATUS,
     buildPreview,
+    buildAllocationPreview,
     createTransactions,
     fetchLandedCostRows,
     getAllocationMethodDefault,
     getCostItemMapDefaults,
     getCostProfileDefaults,
+    getSelectedPurchaseOrderDefaults,
     getVendorBillDefaults,
+    getVendorCurrencyDefaults,
     getVendorDefaults,
     listCostCategoryItemMatches,
     normalizeMode,
+    recalculateAllocatedCosts,
   };
 });

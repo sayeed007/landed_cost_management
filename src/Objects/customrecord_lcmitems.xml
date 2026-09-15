@@ -496,7 +496,7 @@
       <isformula>F</isformula>
       <ismandatory>F</ismandatory>
       <isparent>F</isparent>
-      <label>Bill Status</label>
+      <label>Receive Status</label>
       <linktext></linktext>
       <maxlength>20</maxlength>
       <maxvalue></maxvalue>

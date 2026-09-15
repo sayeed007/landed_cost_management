@@ -53,7 +53,7 @@ Create these before deploying the scripts:
    - Purpose: visible mapped-category selector. Active mapping rows are the only user-facing category options.
 
 6. Child field on `LCM Items`
-   - Label: `Bill Status`
+   - Label: `Receive Status`
    - ID: `custrecord_lcmitems_bill_status`
    - Type: `Free-Form Text`
    - Purpose: `full` when Expected Quantity Receipt equals Quantity Receipt; otherwise `partial`.
@@ -125,7 +125,7 @@ Upload all files into the same File Cabinet folder so the relative module import
 3. Client Script
    - File: `lcm_po_selection_client.js`
    - Attach to the `Landed Cost Management` custom record form.
-   - Trigger: `fieldChanged` on `custrecord_lcm_vendor`, `custrecord_lcm_selected_pos`, `custrecord_lcmitems_receipt`, `custrecord_lcm_lcm_vendor`, and `custrecord_lcm_lcm_cost_item_map`.
+   - Trigger: `lineInit` on the Landed Cost sublist and `fieldChanged` on `custrecord_lcm_vendor`, `custrecord_lcm_selected_pos`, `custrecord_lcmitems_receipt`, `custrecord_lcm_lcm_vendor`, `custrecord_lcm_lcm_currency`, and `custrecord_lcm_lcm_cost_item_map`.
    - Button handler: `openReceivablePoSelector()` opens the selector Suitelet.
    - Popup callback: `applyReceivablePoSelection()` writes selected IDs to `custrecord_lcm_selected_pos` and refreshes the item sublist.
 
@@ -161,14 +161,17 @@ On header Purchase Order Vendor/PO change:
 - Add missing item rows for newly selected PO lines.
 - Keep existing rows for still-selected POs by matching `PO Line Key`.
 - Keep PO-derived fields as read-only references, except `Quantity Receipt`, which remains editable.
-- Recalculate `Bill Status`, `Quantity Remaining`, `PO Value`, and `Total Value` when `Quantity Receipt` changes.
+- Recalculate `Receive Status`, `Quantity Remaining`, `PO Value`, and `Total Value` when `Quantity Receipt` changes.
 - `PO Value` is recalculated in base currency as `PO Rate * PO Exchange Rate * Quantity Receipt`.
 - `Total Value` is recalculated in base currency as `Total Unit Cost * Quantity Receipt`.
 
 On Landed Cost row Vendor Name change:
 
 - Source subsidiary, currency, exchange rate, fixed hidden Bill Type, fixed hidden Bill Line Type, and expense-account compatibility defaults from the selected row vendor where available.
-- Keep Currency and Exchange Rate editable after defaulting.
+- Rename Target Type to Document Type and default it to Bill.
+- Keep Currency and Exchange Rate editable after defaulting; refresh Exchange Rate when Currency changes.
+- Make Effective Date mandatory and default it to today's date.
+- Default Location from the first selected PO's Location when available.
 
 On Landed Cost row LC Cost Category change:
 
@@ -183,6 +186,16 @@ On Create Bill:
 - Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values.
 - Use one merged item line with quantity `1`, summed amount as rate/amount, mapped LC Cost Item, shared LC Cost Category, and distinct row memos joined as the description.
 - Keep all original Landed Cost rows separate on the LCM record and mark each source row `Created` with the same generated Bill reference.
+- Mark `Cost Allocated In GRN` only after item-level allocation succeeds.
+- After confirmation, show a `Back to Landed Cost Management` link to return to the source LCM record.
+
+On Recalculate Landed Cost:
+
+- Do not create or append Vendor Bills.
+- Recalculate item landed cost fresh from all created Bill-type Landed Cost rows on the LCM record.
+- Update tracked `LCM Items` rows with recalculated `Unit Landed Cost`, `Total Unit Cost`, and `Total Value`.
+- Mark all created Bill-type Landed Cost rows as `Cost Allocated In GRN` only after item-level allocation succeeds.
+- Use this to repair created-but-unallocated rows when a prior create attempt partially failed and there are no new Bills to create.
 
 On save:
 
@@ -193,7 +206,7 @@ On save:
 - If a just-saved inline child row is missing that hidden key, match it once by PO + Item, write the generated key, and preserve the user's `Track Item` selection.
 - Preserve matched row values that are not sourced from the PO, including `Track Item`, editable `Quantity Receipt`, `Unit Landed Cost`, `Total Unit Cost`, and derived values.
 - Avoid duplicates using `custrecord_lcmitems_source_line_key`.
-- On each `LCM Items` row save, validate that `Quantity Receipt` is not negative or greater than `Expected Quantity Receipt`, then recalculate `Bill Status`, `Quantity Remaining`, `PO Value`, and `Total Value`.
+- On each `LCM Items` row save, validate that `Quantity Receipt` is not negative or greater than `Expected Quantity Receipt`, then recalculate `Receive Status`, `Quantity Remaining`, `PO Value`, and `Total Value`.
 
 ## Field Mapping
 

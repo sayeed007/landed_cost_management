@@ -29,7 +29,7 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - `Expected Quantity Receipt` means PO quantity still open for receipt.
 - `Quantity Receipt` is editable and means the quantity to receive and bill through this LCM record.
 - `Quantity Remaining` is expected receipt quantity minus current quantity receipt.
-- `Bill Status` is `full` when expected quantity equals receipt quantity, otherwise `partial`.
+- `Receive Status` (`custrecord_lcmitems_bill_status`) is `full` when expected quantity equals receipt quantity, otherwise `partial`.
 - `PO Value` is `PO Rate * PO Exchange Rate * Quantity Receipt`, so it is comparable with base-currency landed-cost allocation.
 - `Total Value` is `Total Unit Cost * Quantity Receipt`; `Total Unit Cost` already includes converted PO rate plus allocated landed cost.
 - `Quantity Bill` is no longer user-facing.
@@ -41,7 +41,12 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - Legacy/native Landed Cost category fields (`custrecord_lcm_lcm_cost_profile` and `custrecord_lcm_lcm_cost_category`) are hidden derived/compatibility fields.
 - `LC Cost Item` sourcing must use the selected `customrecord_lcm_cost_item_map` row. Do not reintroduce exact same-name item matching as a user-facing fallback.
 - Each active `customrecord_lcm_cost_item_map` row maps one native LC Cost Category to one active LC Cost Item; duplicate active mappings for the same category are invalid.
-- Landed Cost `Currency` and `Exchange Rate` are editable, defaultable values.
+- Landed Cost `Document Type` defaults to `Bill`.
+- Landed Cost `Currency` and `Exchange Rate` are editable; changing currency should refresh the exchange rate from a sourced Vendor Bill context.
+- Landed Cost `Effective Date` is mandatory and defaults to today's date.
+- Landed Cost `Location` defaults from the first selected PO location when available.
+- Landed Cost `Cost Allocated In GRN` is checked only after item-level landed-cost allocation succeeds; created-but-unallocated Bill rows can be repaired through `Recalculate Landed Cost`.
+- `Recalculate Landed Cost` must not create or append Vendor Bills. It recalculates item landed cost fresh from all created Bill-type Landed Cost rows and then marks those rows allocated.
 - `LC Cost Item`, `Department`, and `Class` are not user-facing in the landed-cost sublist.
 
 ## Verification

@@ -23,7 +23,11 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
     renameSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
       { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
+      { fieldId: FIELDS.lcmLandedCosts.targetType, label: 'Document Type' },
       { fieldId: FIELDS.lcmLandedCosts.costItemMap, label: 'LC Cost Category' },
+    ]);
+    renameSublistFields(context.form, SUBLISTS.lcmItems, [
+      { fieldId: FIELDS.lcmItems.billStatus, label: 'Receive Status' },
     ]);
     hideSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       FIELDS.lcmLandedCosts.parent,
@@ -92,6 +96,11 @@ define(['N/error', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', '.
         id: 'custpage_lcm_create_journal',
         label: 'Create Journal',
         functionName: 'openLcmAccountingPreview("journal")',
+      });
+      context.form.addButton({
+        id: 'custpage_lcm_recalculate_landed_cost',
+        label: 'Recalculate Landed Cost',
+        functionName: 'openLcmAllocationRecalculation()',
       });
     }
   }

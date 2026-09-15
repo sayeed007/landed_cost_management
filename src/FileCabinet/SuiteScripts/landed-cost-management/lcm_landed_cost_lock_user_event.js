@@ -19,6 +19,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     renameBodyFields(context.form, [
       { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
       { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
+      { fieldId: FIELDS.lcmLandedCosts.targetType, label: 'Document Type' },
       { fieldId: FIELDS.lcmLandedCosts.costItemMap, label: 'LC Cost Category' },
     ]);
     hideBodyFields(context.form, [
@@ -178,6 +179,9 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       rec.setText({ fieldId: f.createdDate, text: todayDateText() });
     }
     const parentDefaults = getParentDefaults(rec);
+    setDefaultTextIfBlank(rec, f.targetType, config.DEFAULTS.targetTypeText);
+    setDefaultIfBlank(rec, f.effectiveDate, new Date());
+    setDefaultIfBlank(rec, f.location, parentDefaults.location, parentDefaults.locationText);
     sourceCostProfileRefs(rec);
     sourceAllocationMethodDefault(rec);
     setTextIfPresent(rec, f.billLineType, config.DEFAULTS.billLineTypeText);
@@ -192,7 +196,11 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     const defaults = accounting.getVendorBillDefaults(vendorId);
     setDefaultIfBlank(rec, f.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
     setDefaultIfBlank(rec, f.currency, defaults.currency, defaults.currencyText);
-    setDefaultIfBlank(rec, f.exchangeRate, defaults.exchangeRate);
+    const currencyId = rec.getValue({ fieldId: f.currency }) || defaults.currency;
+    const currencyDefaults = currencyId
+      ? accounting.getVendorCurrencyDefaults(vendorId, currencyId, rec.getValue({ fieldId: f.subsidiary }) || defaults.subsidiary)
+      : defaults;
+    setDefaultIfBlank(rec, f.exchangeRate, currencyDefaults.exchangeRate || defaults.exchangeRate);
     setDefaultIfBlank(rec, f.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
   }
 
@@ -206,9 +214,14 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
         id: parentId,
         isDynamic: false,
       });
+      const poDefaults = accounting.getSelectedPurchaseOrderDefaults(
+        parent.getValue({ fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders })
+      );
       return {
         vendor: parent.getValue({ fieldId: FIELDS.landedCostManagement.vendor }),
         subsidiary: parent.getValue({ fieldId: FIELDS.landedCostManagement.subsidiary }),
+        location: poDefaults.location,
+        locationText: poDefaults.locationText,
       };
     } catch (loadError) {
       return {};
@@ -336,6 +349,11 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
   function setDefaultIfBlank(rec, fieldId, value, text) {
     if (rec.getValue({ fieldId })) return;
     setValueOrText(rec, fieldId, value, text);
+  }
+
+  function setDefaultTextIfBlank(rec, fieldId, text) {
+    if (rec.getValue({ fieldId }) || !text) return;
+    setTextIfPresent(rec, fieldId, text);
   }
 
   function setValueOrText(rec, fieldId, value, text) {

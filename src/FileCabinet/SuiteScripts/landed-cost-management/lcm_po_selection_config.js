@@ -123,6 +123,7 @@ define([], () => {
   };
 
   const DEFAULTS = {
+    targetTypeText: 'Bill',
     billLineTypeText: 'Item',
     billTypeText: 'LC Bill',
   };

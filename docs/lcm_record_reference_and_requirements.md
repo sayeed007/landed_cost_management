@@ -71,7 +71,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Quantity Receipt | `custrecord_lcmitems_receipt` | Text | Editable quantity that this LCM record is going to receive and bill. Defaults to Expected Quantity Receipt. |
 | Quantity Remaining | `custrecord_lcmitems_quantity_remaining` | Text | Computed as Expected Quantity Receipt minus Quantity Receipt. |
 | Quantity Bill | `custrecord_lcmitems_quantity_bill` | Currency | Deprecated hidden field. Removed from the user-facing Items sublist. |
-| Bill Status | `custrecord_lcmitems_bill_status` | Text | `full` when Expected Quantity Receipt equals Quantity Receipt; otherwise `partial`. |
+| Receive Status | `custrecord_lcmitems_bill_status` | Text | `full` when Expected Quantity Receipt equals Quantity Receipt; otherwise `partial`. Existing field ID is retained for compatibility. |
 | PO Currency | `custrecord_lcmitems_po_currency_text` | Text | PO transaction currency text. Replaces the old amount-type `custrecord_lcmitems_po_currency` field in the user-facing sublist. |
 | Legacy PO Currency Amount | `custrecord_lcmitems_po_currency` | Hidden currency amount | Deprecated amount-type field. It could not display currency names and is hidden from the user-facing Items sublist. |
 | Exchange Rate | `custrecord_lcmitems_exchange_rate` | Text | Exchange rate from the PO line/header search result. |
@@ -99,7 +99,7 @@ This document is the working record and field reference for the Landed Cost Mana
 
 | Name | Field ID | Type | What this is for |
 | --- | --- | --- | --- |
-| Target Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. |
+| Document Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. Mandatory; defaults to `Bill`. Existing field ID is retained for compatibility. |
 | Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. `Create Bill` groups rows by vendor, subsidiary, currency, and exchange rate so one LCM record can create multiple Vendor Bills. Compatible rows inside a Bill group are merged into one Vendor Bill item line when category, cost item, and allocation method also match; effective date and classifications are inherited from the first source row if they differ. |
 | LC Cost Category | `custrecord_lcm_lcm_cost_item_map` | Select, `customrecord_lcm_cost_item_map` | User-facing selector. Only active mapping records appear as options, so users can pick only configured LC Cost Category and LC Cost Item combinations. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Hidden select, `customlist_lcm_bill_line_type` | Fixed hidden value. Landed-cost bills always create Vendor Bill item lines. |
@@ -109,8 +109,8 @@ This document is the working record and field reference for the Landed Cost Mana
 | Cost Category | `custrecord_lcm_lcm_cost_category` | Hidden select/list | Hidden native Cost Category derived from the selected mapping record. NetSuite metadata identifies the target as internal record/list `-155`; generated Vendor Bills use this to tag item lines. |
 | Amount | `custrecord_lcm_lcm_amout` | Currency | Landed-cost amount. Existing field ID spelling is `amout`. |
 | Currency | `custrecord_lcm_lcm_currency` | Select/List | Editable currency context for the landed-cost amount and generated transaction. Defaults from the line Vendor Name when possible. |
-| Exchange Rate | `custrecord_lcm_lcm_exchange_rate` | Currency/number | Editable exchange rate for landed-cost allocation/base amount calculations. Defaults from the line Vendor Name when possible. |
-| Effective Date | `custrecord_lcm_lcm_effective_date` | Date | Effective date for landed-cost allocation/accounting. |
+| Exchange Rate | `custrecord_lcm_lcm_exchange_rate` | Currency/number | Editable exchange rate for landed-cost allocation/base amount calculations. Defaults from the line Vendor Name and refreshes when Currency changes. |
+| Effective Date | `custrecord_lcm_lcm_effective_date` | Date | Mandatory effective date for landed-cost allocation/accounting. Defaults to today's date. |
 | Allocation Method | `custrecord_lcm_lcm_allo_method` | Select, `customlist_lcm_allocation_method` | Allocation method for distributing landed cost to checked item rows. Defaults to `Value`; generated Vendor Bills copy it to `Landed Cost > Cost Allocation Method`. |
 | Expense Account | `custrecord_lcm_lcm_expense_account` | Hidden select, Account (`-112`) | Account used when a Bill row creates an Expense line. Sourced from selected vendor when possible. |
 | LC Cost Item | `custrecord_lcm_lcm_cost_item` | Hidden select, Item (`-10`) | Hidden item used when creating Vendor Bill item lines; sourced from the selected `LCM Cost Category Item Map` row. |
@@ -118,7 +118,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Credit Account | `custrecord_lcm_lcm_credit_account` | Hidden select, Account (`-112`) | Deprecated fallback for legacy Journal rows. New Journal rows try fixed script constant `journalCreditAccount`, then active account candidates. |
 | Department | `custrecord_lcm_lcm_department` | Hidden select, Department (`-102`) | Deprecated hidden classification. Removed from the user-facing Landed Cost sublist. |
 | Class | `custrecord_lcm_lcm_class` | Hidden select, Class (`-101`) | Deprecated hidden classification. Removed from the user-facing Landed Cost sublist. |
-| Location | `custrecord_lcm_lcm_location` | Select, Location (`-103`) | Optional accounting classification copied to generated transaction lines. |
+| Location | `custrecord_lcm_lcm_location` | Select, Location (`-103`) | Optional accounting classification copied to generated transaction lines. Defaults from the first selected PO location when available. |
 | Memo | `custrecord_lcm_lcm_memo` | Text Area | Memo copied to generated transaction lines. |
 | Transaction Number | `custrecord_lcm_lcm_transaction_number` | Text | Created transaction number/reference. |
 | Processing Status | `custrecord_lcm_lcm_status` | Text | Script-managed status. `Created` blocks duplicate accounting creation. |
@@ -126,7 +126,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Created Transaction | `custrecord_lcm_lcm_created_tran_ref` | Select, Transaction (`-30`) | Visible transaction reference to the generated Vendor Bill or Journal Entry. |
 | Created Transaction Type | `custrecord_lcm_lcm_created_tran_type` | Text | Generated transaction type label, such as Vendor Bill or Journal Entry. |
 | Created Date | `custrecord_lcm_lcm_created_date` | Date | Defaults to today when the Landed Cost row is saved; updated when accounting transaction is created. |
-| Cost Allocated In GRN | `custrecord_lcm_lcm_cost_allocation_grn` | Checkbox | Indicates whether the created cost has been allocated to tracked item rows. |
+| Cost Allocated In GRN | `custrecord_lcm_lcm_cost_allocation_grn` | Checkbox | Indicates whether the created cost has been allocated to tracked item rows. Checked only after item-level allocation succeeds; created-but-unallocated Bill rows can be repaired with `Recalculate Landed Cost`. |
 | GRN Number | `custrecord_lcm_lcm_grn_number` | Text | GRN reference number. |
 | Hidden Landed Cost | `custrecord_lcm_lcm_hidden_landed_cost` | Parent select to `customrecord_landed_cost_management` | Parent-child link back to the root Landed Cost Management record. This creates the `Landed Cost` child sublist. |
 

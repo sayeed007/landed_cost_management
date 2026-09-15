@@ -18,10 +18,28 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     try {
       exposeWindowCallbacks();
       announceClientLoad(currentRecord.get());
+      applyLandedCostLineDefaults(currentRecord.get(), '');
       syncCostProfileDefaults(currentRecord.get(), '');
     } catch (error) {
       log.error({
         title: 'LCM cost profile page init sync failed',
+        details: error.message || error,
+      });
+    } finally {
+      syncing = false;
+    }
+  }
+
+  function lineInit(context) {
+    if (syncing) return;
+    if (context.sublistId !== SUBLISTS.lcmLandedCosts) return;
+
+    syncing = true;
+    try {
+      applyLandedCostLineDefaults(currentRecord.get(), context.sublistId);
+    } catch (error) {
+      log.audit({
+        title: 'LCM landed cost line defaults were not applied',
         details: error.message || error,
       });
     } finally {
@@ -118,6 +136,11 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
     if (isLandedCostField(context, FIELDS.lcmLandedCosts.vendor)) {
       syncLandedCostVendorDefaults(currentRecord.get(), context.sublistId);
+      return;
+    }
+
+    if (isLandedCostField(context, FIELDS.lcmLandedCosts.currency)) {
+      syncLandedCostCurrencyExchangeRate(currentRecord.get(), context.sublistId);
       return;
     }
 
@@ -311,9 +334,57 @@ ${defaults.reason || ''}`
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billLineType, '', config.DEFAULTS.billLineTypeText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billType, '', config.DEFAULTS.billTypeText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
+      applyLandedCostLineDefaults(rec, sublistId);
     } catch (error) {
       log.audit({
         title: 'LCM landed cost row vendor defaults were not sourced',
+        details: error.message || error,
+      });
+    }
+  }
+
+  function syncLandedCostCurrencyExchangeRate(rec, contextSublistId) {
+    const sublistId = getLandedCostSublistId(contextSublistId);
+    const vendorId =
+      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.vendor) ||
+      safeGetValue(rec, FIELDS.landedCostManagement.vendor);
+    const currencyId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.currency);
+    const subsidiaryId =
+      getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary) ||
+      safeGetValue(rec, FIELDS.landedCostManagement.subsidiary);
+
+    if (!vendorId || !currencyId) return;
+
+    try {
+      const defaults = fetchVendorCurrencyDefaults(vendorId, currencyId, subsidiaryId);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.exchangeRate, defaults.exchangeRate);
+    } catch (error) {
+      log.audit({
+        title: 'LCM currency exchange rate default was not sourced',
+        details: error.message || error,
+      });
+    }
+  }
+
+  function applyLandedCostLineDefaults(rec, contextSublistId) {
+    const sublistId = getLandedCostSublistId(contextSublistId);
+    setDefaultTextIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.targetType, config.DEFAULTS.targetTypeText);
+    setDefaultValueIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.effectiveDate, new Date());
+    applyDefaultPoLocation(rec, sublistId);
+  }
+
+  function applyDefaultPoLocation(rec, sublistId) {
+    if (getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.location)) return;
+
+    const selectedPoIds = normalizeIds(safeGetValue(rec, FIELDS.landedCostManagement.selectedPurchaseOrders));
+    if (!selectedPoIds.length) return;
+
+    try {
+      const defaults = fetchSelectedPoDefaults(selectedPoIds);
+      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.location, defaults.location, defaults.locationText);
+    } catch (error) {
+      log.audit({
+        title: 'LCM PO location default was not sourced',
         details: error.message || error,
       });
     }
@@ -445,6 +516,38 @@ ${defaults.reason || ''}`
     return payload.defaults || {};
   }
 
+  function fetchVendorCurrencyDefaults(vendorId, currencyId, subsidiaryId) {
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        action: 'vendorCurrencyDefaults',
+        vendorId,
+        currencyId,
+        subsidiaryId: subsidiaryId || '',
+      },
+    });
+    const response = https.get({ url: suiteletUrl });
+    const payload = JSON.parse(response.body || '{}');
+    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return currency exchange defaults.');
+    return payload.defaults || {};
+  }
+
+  function fetchSelectedPoDefaults(poIds) {
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        action: 'selectedPoDefaults',
+        poIds: normalizeIds(poIds).join(','),
+      },
+    });
+    const response = https.get({ url: suiteletUrl });
+    const payload = JSON.parse(response.body || '{}');
+    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return selected PO defaults.');
+    return payload.defaults || {};
+  }
+
   // Resolved server side through the Suitelet rather than with a client-side N/search, so the
   // client and the beforeSubmit path always agree on which category/item a mapping row carries.
   function fetchCostItemMapDefaults(costItemMapId) {
@@ -549,6 +652,26 @@ ${defaults.reason || ''}`
 
     window.open(suiteletUrl, '_blank');
   }
+
+  function openLcmAllocationRecalculation() {
+    const rec = currentRecord.get();
+    if (!rec.id) {
+      window.alert('Save the Landed Cost Management record before recalculating landed cost.');
+      return;
+    }
+
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        parentId: rec.id,
+        action: 'allocationPreview',
+      },
+    });
+
+    window.open(suiteletUrl, '_blank');
+  }
+
 
   function openReceivablePoSelector() {
     exposeWindowCallbacks();
@@ -841,13 +964,36 @@ ${defaults.reason || ''}`
     }
   }
 
+  function setDefaultTextIfBlank(rec, sublistId, fieldId, text) {
+    if (!text || getLandedCostValue(rec, sublistId, fieldId)) return;
+    setTextIfPresent(rec, sublistId, fieldId, text);
+  }
+
+  function setDefaultValueIfBlank(rec, sublistId, fieldId, value) {
+    if (value === null || value === undefined || value === '' || getLandedCostValue(rec, sublistId, fieldId)) return;
+    if (sublistId) {
+      setCurrentIfPresent(rec, sublistId, fieldId, value);
+      return;
+    }
+    try {
+      rec.setValue({ fieldId, value, ignoreFieldChange: true });
+    } catch (error) {
+      log.audit({
+        title: 'LCM default value set failed',
+        details: `${fieldId}: ${error.message || error}`,
+      });
+    }
+  }
+
   return {
     pageInit,
+    lineInit,
     fieldChanged,
     openReceivablePoSelector,
     showPoSelectionLockedMessage,
     applyReceivablePoSelection,
     openLcmAccountingPreview,
+    openLcmAllocationRecalculation,
     selectAllLcmTrackItems,
   };
 });
