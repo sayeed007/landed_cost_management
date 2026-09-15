@@ -100,7 +100,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Name | Field ID | Type | What this is for |
 | --- | --- | --- | --- |
 | Target Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. |
-| Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. `Create Bill` groups rows by this vendor so one LCM record can create multiple Vendor Bills. |
+| Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. `Create Bill` groups rows by vendor, subsidiary, currency, and exchange rate so one LCM record can create multiple Vendor Bills. Compatible rows inside a Bill group are merged into one Vendor Bill item line when category, cost item, and allocation method also match; effective date and classifications are inherited from the first source row if they differ. |
 | LC Cost Category | `custrecord_lcm_lcm_cost_item_map` | Select, `customrecord_lcm_cost_item_map` | User-facing selector. Only active mapping records appear as options, so users can pick only configured LC Cost Category and LC Cost Item combinations. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Hidden select, `customlist_lcm_bill_line_type` | Fixed hidden value. Landed-cost bills always create Vendor Bill item lines. |
 | Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Hidden select, `customlist_bill_type` | Fixed hidden Vendor Bill body Bill Type source. Generated Vendor Bills use `LC Bill` through `custbody12`. |

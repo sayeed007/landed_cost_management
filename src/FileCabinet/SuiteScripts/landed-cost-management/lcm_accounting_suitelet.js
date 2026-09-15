@@ -150,11 +150,12 @@ define(['N/log', 'N/ui/serverWidget', './lcm_accounting_lib'], (log, serverWidge
           <td>${escapeHtml(group.currencyText || group.currency || '')}</td>
           <td>${escapeHtml(group.actionText || '')}</td>
           <td>${group.rows.length}</td>
+          <td>${group.billLineCount || group.rows.length}</td>
           <td>${group.amount}</td>
         </tr>`
       )
       .join('');
-    return `<table class="lcm-table"><thead><tr><th>Vendor</th><th>Subsidiary</th><th>Bill Type</th><th>Currency</th><th>Action</th><th>Rows</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
+    return `<table class="lcm-table"><thead><tr><th>Vendor</th><th>Subsidiary</th><th>Bill Type</th><th>Currency</th><th>Action</th><th>LCM Rows</th><th>Transaction Lines</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   function renderSkipped(skippedRows) {

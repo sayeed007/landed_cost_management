@@ -148,10 +148,12 @@ Implemented behavior:
   - `Create Bill`
   - `Create Journal`
 - Button clicks open a Suitelet preview before any transaction is created.
-- `Create Bill` processes uncreated Landed Cost rows marked `Bill`, grouped by line Vendor Name, subsidiary, and currency. One LCM record can therefore create multiple Vendor Bills for different vendors.
+- `Create Bill` processes uncreated Landed Cost rows marked `Bill`, grouped by line Vendor Name, subsidiary, currency, and exchange rate. One LCM record can therefore create multiple Vendor Bills for different vendors, currencies, or exchange-rate contexts.
+- Within each Vendor Bill group, compatible Landed Cost rows merge into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values. The original Landed Cost rows remain separate and are all linked back to the created Bill.
 - Generated Vendor Bills set body field `custbody12` to `LC Bill`.
 - Generated Vendor Bills set Bill `Landed Cost > Cost Allocation Method` from the Landed Cost row `Allocation Method`; the LCM default is `Value`.
 - Bill rows always create Vendor Bill `item` lines. The old `Bill Line Type` field is hidden and fixed to `Item`.
+- Merged Vendor Bill item lines use quantity `1`, summed amount as rate/amount, the mapped LC Cost Item, the shared LC Cost Category, and distinct row memos joined together as the description.
 - Vendor Bill item lines set NetSuite item-line `Landed Cost Category` from the Landed Cost row `Cost Category`. Tagging is unconditional: it is what makes the generated Bill selectable later as an `Other Transaction` landed cost source on the Item Receipt/GRN.
 - The Bill `Landed Cost` subtab per-category `Source`/`Amount` summary is only written when the generated Bill also carries inventory item lines to absorb the cost. A pure freight/duty/insurance Bill has none, so only line tagging plus `Cost Allocation Method` apply there.
 - Both landed cost writes are evaluated after the Bill lines are added. A prior build read the item sublist before adding any line, so a newly created Bill always looked empty and no landed cost was assigned.

@@ -826,13 +826,14 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return Object.keys(groupsByKey).map((key) => {
       const group = groupsByKey[key];
       group.amount = roundCurrency(group.amount);
+      group.billLineCount = mode === MODES.bill ? buildMergedVendorBillRows(group.rows).length : group.rows.length;
       return group;
     });
   }
 
   function buildGroupKey(row, mode) {
     return mode === MODES.bill
-      ? [row.vendor, row.subsidiary, row.currency].join('|')
+      ? [row.vendor, row.subsidiary, row.currency, row.exchangeRate || 1].join('|')
       : [row.subsidiary, row.currency].join('|');
   }
 
@@ -875,7 +876,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     // makes the Bill selectable later as a landed cost source, so it is never gated on the
     // Bill already having something to allocate onto.
     const costLines = [];
-    group.rows.forEach((row) => {
+    buildMergedVendorBillRows(group.rows).forEach((row) => {
       if (addVendorBillItemLine(bill, row)) costLines.push(row);
     });
 
@@ -884,6 +885,59 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
     const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
     return makeTransactionResult('Vendor Bill', record.Type.VENDOR_BILL, id, group.createdTransactionId ? 'Appended' : 'Created');
+  }
+
+  function buildMergedVendorBillRows(rows) {
+    const mergedByKey = {};
+    const order = [];
+
+    (rows || []).forEach((row) => {
+      const key = buildVendorBillLineKey(row);
+      if (!mergedByKey[key]) {
+        mergedByKey[key] = Object.assign({}, row, {
+          amount: 0,
+          memo: '',
+          sourceRows: [],
+          memoTexts: [],
+          memoLookup: {},
+        });
+        order.push(key);
+      }
+
+      const merged = mergedByKey[key];
+      merged.amount = roundCurrency((merged.amount || 0) + (row.amount || 0));
+      merged.sourceRows.push(row);
+      addDistinctMemo(merged, row.memo);
+    });
+
+    return order.map((key) => {
+      const merged = mergedByKey[key];
+      merged.memo = merged.memoTexts.join('; ') || merged.costCategoryText || merged.billItemText || '';
+      delete merged.memoTexts;
+      delete merged.memoLookup;
+      return merged;
+    });
+  }
+
+  function buildVendorBillLineKey(row) {
+    return [
+      row.vendor,
+      row.subsidiary,
+      row.currency,
+      row.exchangeRate || 1,
+      row.costCategory || row.costCategoryText,
+      row.billItem || row.billItemText,
+      row.allocationMethod || row.allocationMethodText,
+    ]
+      .map((value) => normalizeValue(value))
+      .join('|');
+  }
+
+  function addDistinctMemo(merged, memo) {
+    const memoText = normalizeValue(memo).trim();
+    if (!memoText || merged.memoLookup[memoText]) return;
+    merged.memoLookup[memoText] = true;
+    merged.memoTexts.push(memoText);
   }
 
   function addVendorBillItemLine(bill, row) {

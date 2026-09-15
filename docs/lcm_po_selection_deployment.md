@@ -177,6 +177,13 @@ On Landed Cost row LC Cost Category change:
 - Resolve hidden `LC Cost Item` from the selected mapping row.
 - If the selected mapping is inactive, missing, or points to an inactive item, leave `LC Cost Item` blank and report the mapping reason.
 
+On Create Bill:
+
+- Group Vendor Bills by landed-cost Vendor Name, Subsidiary, Currency, and Exchange Rate.
+- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values.
+- Use one merged item line with quantity `1`, summed amount as rate/amount, mapped LC Cost Item, shared LC Cost Category, and distinct row memos joined as the description.
+- Keep all original Landed Cost rows separate on the LCM record and mark each source row `Created` with the same generated Bill reference.
+
 On save:
 
 - Re-read selected header POs.

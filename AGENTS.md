@@ -33,7 +33,8 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - `PO Value` is `PO Rate * PO Exchange Rate * Quantity Receipt`, so it is comparable with base-currency landed-cost allocation.
 - `Total Value` is `Total Unit Cost * Quantity Receipt`; `Total Unit Cost` already includes converted PO rate plus allocated landed cost.
 - `Quantity Bill` is no longer user-facing.
-- Each Landed Cost row must have its own `Vendor Name`; bills are grouped by that vendor so one LCM record can create multiple Vendor Bills.
+- Each Landed Cost row must have its own `Vendor Name`; bills are grouped by vendor, subsidiary, currency, and exchange rate so one LCM record can create multiple Vendor Bills.
+- Compatible Landed Cost rows are merged into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. If Effective Date, Location, Department, or Class differ inside that merge group, the generated Bill line uses the first source row's values.
 - Landed Cost `Bill Line Type` is always `Item` and should be hidden.
 - Landed Cost `Bill Type` is always `LC Bill` and should be hidden.
 - The user-facing Landed Cost `LC Cost Category` field is `custrecord_lcm_lcm_cost_item_map`, a selector to active `customrecord_lcm_cost_item_map` records.
