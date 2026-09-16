@@ -7,6 +7,8 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - Work on NetSuite custom records, SuiteScripts, SDF objects, and the requirements docs under `docs/`.
 - Treat `docs/lcm_record_reference_and_requirements.md` and `docs/lcm_implemented_requirements.md` as the current functional reference.
 - Keep customer-demo feedback reflected in both implementation and docs before considering a change complete.
+- Keep the Confluence project record current: whenever a new day of work or a new requirement is introduced, update both `001 Project plan` and `002 Meeting notes` with the dated/time-stamped status, decisions, implementation changes, and open follow-ups.
+- Treat `001 Project plan` as the current-state snapshot. Treat `002 Meeting notes` as an append-only, stacked meeting/work log: add each new dated entry at the top, keep the newest entry first, and preserve earlier entries below it instead of replacing the history with one consolidated table.
 - Do not invent NetSuite account-specific internal IDs. When an ID is account-generated or uncertain, keep it configurable or document the account dependency.
 
 ## Repo Conventions
@@ -35,6 +37,7 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - `Quantity Bill` is no longer user-facing.
 - Each Landed Cost row must have its own `Vendor Name`; bills are grouped by vendor, subsidiary, currency, and exchange rate so one LCM record can create multiple Vendor Bills.
 - Compatible Landed Cost rows are merged into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. If Effective Date, Location, Department, or Class differ inside that merge group, the generated Bill line uses the first source row's values.
+- When appending to an existing generated Vendor Bill, compatible new rows must be absorbed into matching existing cost lines and duplicate generated lines consolidated. `Recalculate Landed Cost` repairs allocation only and must not rewrite an already-created Vendor Bill.
 - Landed Cost `Bill Line Type` is always `Item` and should be hidden.
 - Landed Cost `Bill Type` is always `LC Bill` and should be hidden.
 - The user-facing Landed Cost `LC Cost Category` field is `custrecord_lcm_lcm_cost_item_map`, a selector to active `customrecord_lcm_cost_item_map` records.

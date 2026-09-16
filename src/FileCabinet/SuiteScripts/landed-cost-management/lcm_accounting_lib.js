@@ -979,6 +979,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
             ? `Append to ${existingTransaction.type || 'Transaction'} ${existingTransaction.number || existingTransaction.id}`
             : 'Create new transaction',
           rows: [],
+          existingRows: (createdRows || []).filter((createdRow) => buildGroupKey(createdRow, mode) === key),
           amount: 0,
         };
       }
@@ -1040,11 +1041,16 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     // Bill already having something to allocate onto.
     const costLines = [];
     buildMergedVendorBillRows(group.rows).forEach((row) => {
-      if (addVendorBillItemLine(bill, row)) costLines.push(row);
+      if (addOrMergeVendorBillItemLine(bill, row)) costLines.push(row);
     });
 
     // Evaluated after the lines exist; on a new Bill the item sublist is empty up to here.
-    applyVendorBillNativeLandedCosts(bill, group.rows, firstRow.allocationMethodText, costLines);
+    applyVendorBillNativeLandedCosts(
+      bill,
+      (group.existingRows || []).concat(group.rows || []),
+      firstRow.allocationMethodText,
+      costLines
+    );
 
     const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
     return makeTransactionResult('Vendor Bill', record.Type.VENDOR_BILL, id, group.createdTransactionId ? 'Appended' : 'Created');
@@ -1101,6 +1107,92 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (!memoText || merged.memoLookup[memoText]) return;
     merged.memoLookup[memoText] = true;
     merged.memoTexts.push(memoText);
+  }
+
+  function addOrMergeVendorBillItemLine(bill, row) {
+    const existingLines = findMatchingVendorBillCostLines(bill, row);
+    if (!existingLines.length) return addVendorBillItemLine(bill, row);
+
+    const primaryLine = existingLines[0];
+    const mergedAmount = roundCurrency(
+      existingLines.reduce((total, line) => total + (toNumber(line.amount) || 0), 0) + (row.amount || 0)
+    );
+    const mergedMemo = mergeVendorBillLineDescriptions(
+      existingLines.map((line) => line.description),
+      row.memo || row.costCategoryText || row.billItemText
+    );
+
+    bill.selectLine({ sublistId: 'item', line: primaryLine.line });
+    setCurrentIfPresent(bill, 'item', 'quantity', 1);
+    setCurrentIfPresent(bill, 'item', 'rate', mergedAmount);
+    setCurrentIfPresent(bill, 'item', 'amount', mergedAmount);
+    setCurrentIfPresent(bill, 'item', 'description', mergedMemo);
+    bill.commitLine({ sublistId: 'item' });
+
+    // Remove duplicate generated lines after the first line has absorbed their amounts.
+    for (let index = existingLines.length - 1; index > 0; index -= 1) {
+      bill.removeLine({ sublistId: 'item', line: existingLines[index].line, ignoreRecalc: true });
+    }
+
+    return true;
+  }
+
+  function findMatchingVendorBillCostLines(bill, row) {
+    const matches = [];
+    const lineCount = getLineCount(bill, 'item');
+    const billAllocationMethod = getVendorBillLandedCostMethodTextFromRecord(bill);
+    const rowAllocationMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
+
+    // A Vendor Bill stores the allocation method at header level, while category and item
+    // are stored on each cost line. Do not merge across methods when the header exposes it.
+    if (billAllocationMethod && rowAllocationMethod && billAllocationMethod !== rowAllocationMethod) return matches;
+
+    for (let line = 0; line < lineCount; line += 1) {
+      const category = getSublistValue(bill, 'item', 'landedcostcategory', line);
+      const item = getSublistValue(bill, 'item', 'item', line);
+      if (!matchesVendorBillLineField(category, getSublistText(bill, 'item', 'landedcostcategory', line), row.costCategory, row.costCategoryText)) {
+        continue;
+      }
+      if (!matchesVendorBillLineField(item, getSublistText(bill, 'item', 'item', line), row.billItem, row.billItemText)) {
+        continue;
+      }
+
+      matches.push({
+        line,
+        amount: getSublistValue(bill, 'item', 'amount', line),
+        description: getSublistValue(bill, 'item', 'description', line),
+      });
+    }
+
+    return matches;
+  }
+
+  function matchesVendorBillLineField(lineValue, lineText, rowValue, rowText) {
+    const normalizedLineValue = normalizeValue(lineValue);
+    const normalizedRowValue = normalizeValue(rowValue);
+    if (normalizedLineValue && normalizedRowValue) return normalizedLineValue === normalizedRowValue;
+
+    const normalizedLineText = normalizeValue(lineText).trim();
+    const normalizedRowText = normalizeValue(rowText).trim();
+    return Boolean(normalizedLineText && normalizedRowText && normalizedLineText === normalizedRowText);
+  }
+
+  function mergeVendorBillLineDescriptions(descriptions, fallback) {
+    const merged = { memoTexts: [], memoLookup: {} };
+    (descriptions || []).forEach((description) => addDistinctMemo(merged, description));
+    addDistinctMemo(merged, fallback);
+    return merged.memoTexts.join('; ');
+  }
+
+  function getVendorBillLandedCostMethodTextFromRecord(bill) {
+    const fieldIds = getVendorBillLandedCostMethodFieldIds();
+    for (let index = 0; index < fieldIds.length; index += 1) {
+      const text = getRecordText(bill, fieldIds[index]);
+      if (text) return getVendorBillLandedCostMethodText(text);
+      const value = getRecordValue(bill, fieldIds[index]);
+      if (value) return getVendorBillLandedCostMethodText(value);
+    }
+    return '';
   }
 
   function addVendorBillItemLine(bill, row) {
@@ -1337,6 +1429,15 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     try {
       const value = rec.getSublistValue({ sublistId, fieldId, line });
       return value === null || value === undefined ? '' : value;
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function getSublistText(rec, sublistId, fieldId, line) {
+    try {
+      const text = rec.getSublistText({ sublistId, fieldId, line });
+      return text === null || text === undefined ? '' : text;
     } catch (error) {
       return '';
     }
