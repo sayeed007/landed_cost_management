@@ -177,6 +177,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         <p>Eligible rows: ${preview.eligibleRows.length}. Skipped rows: ${preview.skippedRows.length}. Transaction groups: ${preview.groups.length}. Allocation target item rows: ${preview.allocationTargetCount}.</p>
         ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
         ${renderGroups(preview.groups)}
+        ${renderBillLines(preview.groups)}
         ${renderSkipped(preview.skippedRows)}
         <p class="lcm-muted">Close this window without confirming if the preview is not correct.</p>
       </div>
@@ -213,6 +214,27 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
       )
       .join('');
     return `<table class="lcm-table"><thead><tr><th>Vendor</th><th>Subsidiary</th><th>Bill Type</th><th>Currency</th><th>Action</th><th>LCM Rows</th><th>Transaction Lines</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  // One row per Vendor Bill line that would be written, with the Landed Cost rows behind it.
+  // Two lines where one was expected is answered here: compare the LC Cost Category, LC Cost
+  // Item and Allocation Method, which together decide whether rows merge.
+  function renderBillLines(groups) {
+    const rows = (groups || [])
+      .reduce((all, group) => all.concat(group.billLines || []), [])
+      .map(
+        (line) => `<tr>
+          <td>${escapeHtml((line.sourceRowIds || []).join(', '))}</td>
+          <td>${escapeHtml(line.costCategoryText)}</td>
+          <td>${escapeHtml(line.billItemText)}</td>
+          <td>${escapeHtml(line.allocationMethodText)}</td>
+          <td>1</td>
+          <td>${escapeHtml(String(line.amount))}</td>
+        </tr>`
+      )
+      .join('');
+    if (!rows) return '';
+    return `<h4>Vendor Bill lines to be written</h4><table class="lcm-table"><thead><tr><th>From LCM Rows</th><th>LC Cost Category</th><th>LC Cost Item</th><th>Allocation Method</th><th>Qty</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   function renderSkipped(skippedRows) {

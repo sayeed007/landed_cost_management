@@ -943,7 +943,22 @@ define(
     return Object.keys(groupsByKey).map((key) => {
       const group = groupsByKey[key];
       group.amount = roundCurrency(group.amount);
-      group.billLineCount = mode === MODES.bill ? buildMergedVendorBillRows(group.rows).length : group.rows.length;
+      if (mode !== MODES.bill) {
+        group.billLineCount = group.rows.length;
+        group.billLines = [];
+        return group;
+      }
+
+      const mergedRows = buildMergedVendorBillRows(group.rows);
+      group.billLineCount = mergedRows.length;
+      group.billLines = mergedRows.map((merged) => ({
+        sourceRowIds: merged.sourceRowIds,
+        costCategoryText: merged.costCategoryText || merged.costItemMapText || '',
+        billItemText: merged.billItemText || '',
+        allocationMethodText: getVendorBillLandedCostMethodText(merged.allocationMethodText),
+        amount: merged.amount,
+        lineKey: merged.lineKey,
+      }));
       return group;
     });
   }
@@ -1129,7 +1144,14 @@ define(
       identitySegment('sub', row.subsidiary, row.subsidiaryText),
       identitySegment('cur', row.currency, row.currencyText),
       buildCostIdentity(row),
-      identitySegment('mth', row.allocationMethod, row.allocationMethodText),
+      // The EFFECTIVE method, not the raw list value. A Vendor Bill is governed by the one
+      // method written to its header, and that is this normalized text - so two rows NetSuite
+      // will allocate identically belong on one line even when their list values differ. The
+      // field is form-disabled and defaulted, so a row can easily end up blank ('' -> Value)
+      // beside one holding the Value list id, and keying on the raw value split those into
+      // two lines with nothing to show for it. This is also exactly what the mixed-method
+      // refusal compares, so the key and the refusal can no longer disagree.
+      identitySegment('mth', '', getVendorBillLandedCostMethodText(row.allocationMethodText)),
     ].join('|');
   }
 
