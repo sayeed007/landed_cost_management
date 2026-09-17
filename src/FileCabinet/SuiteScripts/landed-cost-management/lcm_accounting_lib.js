@@ -113,6 +113,7 @@ define(
     preview.groups = groupRows(preview.eligibleRows, mode, createdRows);
     if (mode === MODES.bill) {
       findAllocationMethodConflicts(preview.groups).forEach((conflict) => preview.errors.push(conflict));
+      annotateVendorBillLineActions(preview.groups);
     }
     preview.ok = preview.errors.length === 0 && (preview.eligibleRows.length > 0 || preview.unallocatedCreatedRows.length > 0);
     return preview;
@@ -996,6 +997,60 @@ define(
     );
   }
 
+  // For a group appending to an existing Vendor Bill, say per line whether it will merge into
+  // a line already on that Bill or add a new one, and when it will not merge, show the markers
+  // the Bill actually carries next to the one being looked for. "Why did appending add a line
+  // instead of merging?" can only be answered by reading the Bill, so the preview reads it.
+  function annotateVendorBillLineActions(groups) {
+    (groups || []).forEach((group) => {
+      if (!group.createdTransactionId || !(group.billLines || []).length) return;
+
+      let bill;
+      try {
+        bill = record.load({ type: record.Type.VENDOR_BILL, id: group.createdTransactionId, isDynamic: false });
+      } catch (error) {
+        group.billLines.forEach((line) => {
+          line.action = `Vendor Bill ${group.createdTransactionId} could not be read: ${error.message || error}`;
+        });
+        return;
+      }
+
+      const markersOnBill = listVendorBillLineSourceKeys(bill);
+      buildMergedVendorBillRows(group.rows).forEach((mergedRow, index) => {
+        const line = group.billLines[index];
+        if (!line) return;
+
+        line.expectedSourceKey = buildVendorBillSourceKey(mergedRow);
+        const divergentLines = [];
+        const matches = findMatchingVendorBillCostLines(bill, mergedRow, { divergentLines });
+        if (matches.length) {
+          line.action = `Merge into existing line ${matches.map((match) => match.line + 1).join(', ')}`;
+          return;
+        }
+
+        line.willAddNewLine = true;
+        line.markersOnBill = markersOnBill;
+        if (divergentLines.length) {
+          line.action = `Add a new line - line ${divergentLines.map((entry) => entry.line + 1).join(', ')} carries this merge key but its item is now "${divergentLines[0].itemText}"`;
+          return;
+        }
+        line.action = markersOnBill.length
+          ? 'Add a new line - no line on this Bill carries this merge key'
+          : 'Add a new line - no line on this Bill carries an LCM Source Key at all';
+      });
+    });
+  }
+
+  function listVendorBillLineSourceKeys(bill) {
+    const count = getLineCount(bill, 'item');
+    const keys = [];
+    for (let line = 0; line < count; line += 1) {
+      const key = getVendorBillLineSourceKey(bill, line);
+      if (key && keys.indexOf(key) < 0) keys.push(key);
+    }
+    return keys;
+  }
+
   function buildGroupKey(row, mode) {
     // A Vendor Bill has one currency and one header exchange rate. Source row rates are still
     // applied independently during base-currency GRN allocation, so rate differences must not
@@ -1295,10 +1350,13 @@ define(
     }
 
     if (!existingLines.length) {
+      const markersOnBill = listVendorBillLineSourceKeys(bill);
       return addNewLineInstead(
         divergentLines.length
           ? `line ${divergentLines.map((entry) => entry.line).join(', ')} carries this merge key but its item has since been changed to "${divergentLines[0].itemText}", so it was left untouched`
-          : 'no line on this Bill carries this merge key'
+          : `no line on this Bill carries the marker ${buildVendorBillSourceKey(row)}. Markers present: ${
+              markersOnBill.length ? markersOnBill.join(' | ') : '(none)'
+            }`
       );
     }
 
