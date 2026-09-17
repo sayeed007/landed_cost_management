@@ -1022,7 +1022,8 @@ define(
 
         line.expectedSourceKey = buildVendorBillSourceKey(mergedRow);
         const divergentLines = [];
-        const matches = findMatchingVendorBillCostLines(bill, mergedRow, { divergentLines });
+        const diagnostics = [];
+        const matches = findMatchingVendorBillCostLines(bill, mergedRow, { divergentLines, diagnostics });
         if (matches.length) {
           line.action = `Merge into existing line ${matches.map((match) => match.line + 1).join(', ')}`;
           return;
@@ -1030,13 +1031,9 @@ define(
 
         line.willAddNewLine = true;
         line.markersOnBill = markersOnBill;
-        if (divergentLines.length) {
-          line.action = `Add a new line - line ${divergentLines.map((entry) => entry.line + 1).join(', ')} carries this merge key but its item is now "${divergentLines[0].itemText}"`;
-          return;
-        }
-        line.action = markersOnBill.length
-          ? 'Add a new line - no line on this Bill carries this merge key'
-          : 'Add a new line - no line on this Bill carries an LCM Source Key at all';
+        // The matcher says why, line by line. Nothing here is inferred.
+        line.diagnostics = diagnostics;
+        line.action = 'Add a new line';
       });
     });
   }
@@ -1453,13 +1450,21 @@ define(
     // Optional out-parameter: marked lines whose item no longer matches, for the caller to
     // report. They are never returned as matches.
     const divergentLines = (options && options.divergentLines) || null;
+    // Optional out-parameter: why each line was or was not a match, so a caller never has to
+    // infer a reason it cannot see.
+    const diagnostics = (options && options.diagnostics) || null;
     const sourceKey = buildVendorBillSourceKey(row);
-    const billAllocationMethod = getVendorBillLandedCostMethodTextFromRecord(bill);
-    const rowAllocationMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
 
-    // A Vendor Bill stores the allocation method at header level, while category and item
-    // are stored on each cost line. Do not merge across methods when the header exposes it.
-    if (billAllocationMethod && rowAllocationMethod && billAllocationMethod !== rowAllocationMethod) return matches;
+    // There was a guard here comparing the Bill's header Cost Allocation Method against the
+    // row's, and returning no matches when they differed. It predates the marker and is now
+    // both redundant and harmful: the effective method is part of the merge key, so it is
+    // part of the marker, so two rows with different methods already cannot match. All the
+    // guard could still do was reject on a header value that disagreed with the row - for a
+    // header this tool wrote from the first row of the group - and return before comparing a
+    // single line. The marker is the authority; nothing else gets a veto.
+    if (diagnostics) {
+      diagnostics.push(`Looking for marker ${sourceKey || '(this row has no parent id, so no marker could be built)'} across ${lineCount} item line(s).`);
+    }
 
     for (let line = 0; line < lineCount; line += 1) {
       const category = getSublistValue(bill, 'item', 'landedcostcategory', line);
@@ -1471,7 +1476,12 @@ define(
       const lineSourceKey = getVendorBillLineSourceKey(bill, line);
 
       // No marker, or another LCM record's marker: not this record's line for this group.
-      if (!sourceKey || lineSourceKey !== sourceKey) continue;
+      if (!sourceKey || lineSourceKey !== sourceKey) {
+        if (diagnostics) {
+          diagnostics.push(`Line ${line + 1}: marker ${lineSourceKey ? `"${lineSourceKey}"` : '(blank)'} is not the one being looked for.`);
+        }
+        continue;
+      }
 
       // The marker proves who wrote the line. It does not prove the line still holds what
       // was written: the item can be edited afterwards while the column stays put, and
@@ -1489,9 +1499,13 @@ define(
           title: 'LCM Vendor Bill marked line no longer carries its own item',
           details: `Line ${line} carries marker ${lineSourceKey} but its item is now "${itemText || item}" instead of "${row.billItemText || row.billItem}". It is left untouched.`,
         });
+        if (diagnostics) {
+          diagnostics.push(`Line ${line + 1}: marker matches, but its item is "${itemText || item}" instead of "${row.billItemText || row.billItem}".`);
+        }
         continue;
       }
 
+      if (diagnostics) diagnostics.push(`Line ${line + 1}: marker and item both match.`);
       matches.push({
         line,
         amount: getSublistValue(bill, 'item', 'amount', line),
@@ -1515,17 +1529,6 @@ define(
         .forEach((part) => addDistinctMemo(merged, part));
     });
     return merged.memoTexts.join('; ');
-  }
-
-  function getVendorBillLandedCostMethodTextFromRecord(bill) {
-    const fieldIds = getVendorBillLandedCostMethodFieldIds();
-    for (let index = 0; index < fieldIds.length; index += 1) {
-      const text = getRecordText(bill, fieldIds[index]);
-      if (text) return getVendorBillLandedCostMethodText(text);
-      const value = getRecordValue(bill, fieldIds[index]);
-      if (value) return getVendorBillLandedCostMethodText(value);
-    }
-    return '';
   }
 
   function addVendorBillItemLine(bill, row) {
