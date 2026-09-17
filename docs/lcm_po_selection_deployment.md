@@ -190,6 +190,9 @@ On Create Bill:
 - Refuse a Vendor Bill group whose Landed Cost rows disagree about the Allocation Method. `Cost Allocation Method` is a Vendor Bill body field, so one Bill can only carry one; separate lines would still all be allocated by whichever method reached the header. Report both methods and the rows asking for each, and leave grouping by vendor/subsidiary/currency unchanged.
 - Refuse a Landed Cost row whose LC Cost Category mapping does not resolve to a Cost Category and an active LC Cost Item. Never fall back to the hidden native values that mapping was supposed to derive.
 - Stamp every generated landed-cost line with the hidden ownership marker `custcol_lcm_source_key` (`LCM<record id>::<merge key>`), and rewrite or remove only lines whose marker matches. Never infer ownership from amounts: a 600 generated line beside a 400 manual line reconciles against a 1,000 total while identifying neither.
+- Apply the Cost Category and then the marker as the last writes on a line, and read both back before committing. Cancel the line if either did not take.
+- Do not merge into a marked line whose item no longer matches the Landed Cost row; report it and leave it alone.
+- Build every transaction in the run before saving any of them, so a line that cannot be tagged or marked aborts with nothing saved. When a save fails after earlier ones succeeded, report exactly which transactions were written and that re-running will append to them.
 - Never let an append touch an unmarked line; add a new line instead. Unmarked lines may only be consolidated by the repair flow, after it has listed each one and taken a second explicit confirmation.
 - Abort the run when a new cost line cannot be tagged with its Cost Category. Do not save a Bill and mark rows `Created` around a line that can never act as a landed cost source.
 - Abandon a consolidation whose surviving line cannot be tagged with its Cost Category, checking before the commit so the Bill is never left inflated or collapsed into an untagged line.
@@ -205,6 +208,7 @@ On Repair Vendor Bill Lines:
 - Consolidate duplicate cost lines into one line per merge identity, with quantity `1` and the distinct descriptions merged.
 - Re-tag a cost line whose `Landed Cost Category` is missing.
 - Consolidate marker-matched lines by default. Include unmarked lines only on a second explicit confirmation, having first listed every one of them with its Bill, line number, category, item, amount, and description.
+- Offer a lone unmarked line too when that mode is confirmed: adopting it stamps the marker without changing its amount, and is what stops later appends adding a line beside it.
 - Refuse a Bill whose Landed Cost rows disagree about the Allocation Method, exactly as Create Bill does, and report why.
 - Stamp the marker on every line the repair writes, so later appends merge into it without asking again.
 - Re-match against the reloaded record at confirmation time rather than trusting the preview.

@@ -126,15 +126,43 @@ define(
       throw error;
     }
 
+    // Two phases. Every transaction is built and fully validated in memory first, so a line
+    // that cannot be tagged or marked aborts while nothing at all has been saved - which is
+    // what lets that failure say, truthfully, that no Vendor Bill was written.
+    //
+    // Saving is still one record at a time; NetSuite has no transaction spanning several
+    // records. A failure during the save phase is therefore reported with exactly what had
+    // already been written, rather than left for the user to work out.
+    const prepared = preview.groups.map((group) =>
+      preview.mode === MODES.bill ? prepareVendorBill(group) : prepareJournalEntry(group)
+    );
+
     const created = [];
     const createdRows = [];
     let allocatedRowCount = 0;
-    preview.groups.forEach((group) => {
-      const transaction =
-        preview.mode === MODES.bill ? createVendorBill(group) : createJournalEntry(group);
-      markCostRowsCreated(group.rows, transaction);
-      createdRows.push(...group.rows);
+    prepared.forEach((entry, index) => {
+      let transaction;
+      try {
+        transaction = entry.save();
+      } catch (error) {
+        throw buildPartialCreateError(error, created, index, prepared.length, 'could not be saved');
+      }
       created.push(transaction);
+
+      try {
+        markCostRowsCreated(entry.group.rows, transaction);
+      } catch (error) {
+        // The transaction exists but its rows do not point at it, so a later run would build
+        // a second one. That has to be said out loud rather than swallowed.
+        throw buildPartialCreateError(
+          error,
+          created,
+          index,
+          prepared.length,
+          `was saved as ${transaction.label} ${transaction.tranid || transaction.id}, but its Landed Cost rows could not be marked Created. Set their Created Transaction to that id before running this again, or a duplicate will be created`
+        );
+      }
+      createdRows.push(...entry.group.rows);
     });
     if (preview.mode === MODES.bill) {
       const rowsForAllocation = getCreatedBillRows(parentId);
@@ -153,6 +181,21 @@ define(
       skippedRows: preview.skippedRows,
       allocationTargetCount: preview.allocationTargetCount,
     };
+  }
+
+  function buildPartialCreateError(error, created, index, total, what) {
+    const detail = (error && error.message) || String(error);
+    const alreadySaved = created.slice(0, index);
+    const preamble = `Transaction ${index + 1} of ${total} ${what}.`;
+    if (!alreadySaved.length) {
+      return new Error(`${preamble} Nothing else was saved.\n${detail}`);
+    }
+    return new Error(
+      `${preamble}\n\nThe ${alreadySaved.length} transaction(s) saved before it were kept: ` +
+        `${alreadySaved.map((transaction) => `${transaction.label} ${transaction.tranid || transaction.id}`).join(', ')}. ` +
+        'Their Landed Cost rows are marked Created, so re-running this action will append to them ' +
+        `rather than duplicate them, and will retry the remaining ${total - index} transaction(s).\n${detail}`
+    );
   }
 
   function buildAllocationPreview(parentId) {
@@ -307,9 +350,18 @@ define(
     }
 
     mergedRows.forEach((mergedRow) => {
+      const divergentLines = [];
       const lines = findMatchingVendorBillCostLines(bill, mergedRow, {
         allowUnmarkedLines: includeLegacyLines,
+        divergentLines,
       });
+      divergentLines.forEach((entry) => {
+        plan.blockedGroups.push(
+          `Line ${entry.line} carries this LCM record's marker but its item has since been changed to "${entry.itemText}" ` +
+            `instead of "${entry.expectedItemText}". Nothing in that group is consolidated; correct the line by hand first.`
+        );
+      });
+      if (divergentLines.length) return;
       const lineTotal = sumVendorBillLineAmounts(lines);
       const untagged = lines.filter((line) => !line.hasCategory).length;
       const unmarked = lines.filter((line) => !line.marked);
@@ -348,7 +400,13 @@ define(
       plan.untaggedLineCount += untagged;
     });
 
-    plan.needsRepair = plan.duplicateLineCount > 0 || plan.untaggedLineCount > 0;
+    // A single unmarked line needs no consolidating, but it does need adopting: until it
+    // carries the marker every later append adds another line beside it. So in legacy mode
+    // the presence of any unmarked line is itself reason to offer the repair.
+    plan.needsRepair =
+      plan.duplicateLineCount > 0 ||
+      plan.untaggedLineCount > 0 ||
+      (plan.includeLegacyLines && plan.legacyLineCount > 0);
     return plan;
   }
 
@@ -392,9 +450,18 @@ define(
     // Re-matched against the freshly loaded record: every removal shifts the line indexes the
     // preview captured, so the preview is a plan and never a set of coordinates to write to.
     plan.mergedRows.forEach((mergedRow) => {
+      const divergentLines = [];
       const lines = findMatchingVendorBillCostLines(bill, mergedRow, {
         allowUnmarkedLines: includeLegacyLines,
+        divergentLines,
       });
+      if (divergentLines.length) {
+        log.audit({
+          title: 'LCM Vendor Bill line repair skipped',
+          details: `Vendor Bill ${plan.billId}: line ${divergentLines.map((entry) => entry.line).join(', ')} carries this record's marker but no longer holds its item, so key ${mergedRow.lineKey} was left untouched.`,
+        });
+        return;
+      }
       if (!lines.length) return;
       // One line that is already marked and tagged is already in its final shape.
       if (lines.length === 1 && lines[0].hasCategory && lines[0].marked) return;
@@ -1191,7 +1258,9 @@ define(
     return transactionsByKey;
   }
 
-  function createVendorBill(group) {
+  // Builds the Vendor Bill without saving it and hands back a save() the caller runs once
+  // every group has been built successfully.
+  function prepareVendorBill(group) {
     const bill = group.createdTransactionId
       ? record.load({ type: record.Type.VENDOR_BILL, id: group.createdTransactionId, isDynamic: true })
       : record.create({ type: record.Type.VENDOR_BILL, isDynamic: true });
@@ -1243,8 +1312,18 @@ define(
       costLines
     );
 
-    const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
-    return makeTransactionResult('Vendor Bill', record.Type.VENDOR_BILL, id, group.createdTransactionId ? 'Appended' : 'Created');
+    return {
+      group,
+      save() {
+        const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
+        return makeTransactionResult(
+          'Vendor Bill',
+          record.Type.VENDOR_BILL,
+          id,
+          group.createdTransactionId ? 'Appended' : 'Created'
+        );
+      },
+    };
   }
 
   function buildMergedVendorBillRows(rows) {
@@ -1352,15 +1431,48 @@ define(
   }
 
   function setVendorBillLineSourceKey(bill, row) {
+    const fieldId = TRANSACTION_FIELDS.vendorBillLine.sourceKey;
     const sourceKey = buildVendorBillSourceKey(row);
-    if (!sourceKey) return false;
-    return setCurrentSublistFieldByValueOrText(
-      bill,
-      'item',
-      TRANSACTION_FIELDS.vendorBillLine.sourceKey,
-      [sourceKey],
-      [sourceKey]
-    );
+    if (!sourceKey) {
+      log.error({
+        title: 'LCM Vendor Bill line marker could not be built',
+        details: `Landed Cost row ${row.id} has no parent record id, so no ownership marker could be built for its Vendor Bill line.`,
+      });
+      return false;
+    }
+
+    setCurrentSublistFieldByValueOrText(bill, 'item', fieldId, [sourceKey], [sourceKey]);
+
+    // Read back and compare exactly. A setter that does not throw has not necessarily
+    // written anything: the column may be absent from the form, or silently truncated. An
+    // unmarked line is invisible to every later append, which would then add a duplicate,
+    // and it cannot be consolidated again without the user re-attesting to it.
+    const applied = normalizeValue(getCurrentSublistValueSafe(bill, 'item', fieldId)).trim();
+    if (applied === sourceKey) return true;
+
+    log.error({
+      title: 'LCM Vendor Bill line marker not applied',
+      details: `Landed Cost row ${row.id}: wrote "${sourceKey}" to ${fieldId} but read back "${applied}". The line column is missing from this Vendor Bill form, or it rejected the value.`,
+    });
+    return false;
+  }
+
+  // Cost Category and ownership marker, applied in the only order that survives NetSuite's
+  // re-sourcing and both verified by reading them back. Returns '' when the line is good, or
+  // the reason it is not. A cost line without its category can never act as a landed cost
+  // source, and one without its marker can never be recognised again, so a line missing
+  // either is not worth committing.
+  function applyVendorBillCostLineIdentity(bill, row) {
+    // Category first: it is what NetSuite re-sources when item, rate or amount change, so it
+    // has to go on after those. The marker is a plain text column and does not re-source.
+    if (!setVendorBillLineCostCategory(bill, row)) return describeUntaggedCostLine(row);
+    if (!setVendorBillLineSourceKey(bill, row)) return describeUnmarkedCostLine(row);
+
+    // Re-read the category: writing the marker must not have disturbed it.
+    const category = normalizeValue(getCurrentSublistValueSafe(bill, 'item', 'landedcostcategory')).trim();
+    if (!category) return describeUntaggedCostLine(row);
+
+    return '';
   }
 
 
@@ -1391,7 +1503,8 @@ define(
     // Only marker-matched lines are considered here, so every match is provably this LCM
     // record's own line for this merge group. Unmarked lines - legacy or hand-added - are
     // never touched by an append; the repair flow deals with those, with the user's consent.
-    const existingLines = findMatchingVendorBillCostLines(bill, row);
+    const divergentLines = [];
+    const existingLines = findMatchingVendorBillCostLines(bill, row, { divergentLines });
 
     function addNewLineInstead(reason) {
       log.audit({
@@ -1401,7 +1514,13 @@ define(
       return addVendorBillItemLine(bill, row);
     }
 
-    if (!existingLines.length) return addNewLineInstead('no line on this Bill carries this merge key');
+    if (!existingLines.length) {
+      return addNewLineInstead(
+        divergentLines.length
+          ? `line ${divergentLines.map((entry) => entry.line).join(', ')} carries this merge key but its item has since been changed to "${divergentLines[0].itemText}", so it was left untouched`
+          : 'no line on this Bill carries this merge key'
+      );
+    }
 
     const existingAmount = sumVendorBillLineAmounts(existingLines);
     const mergedAmount = roundCurrency(existingAmount + (row.amount || 0));
@@ -1445,12 +1564,13 @@ define(
     setCurrentIfPresent(bill, 'item', 'rate', totalAmount);
     setCurrentIfPresent(bill, 'item', 'amount', totalAmount);
     setCurrentIfPresent(bill, 'item', 'description', description);
-    // Stamps the marker on a line that had none, so a repaired legacy line becomes provably
-    // owned and every later append can merge into it without asking the user anything.
-    setVendorBillLineSourceKey(bill, row);
-    // Set last: NetSuite re-sources the line when rate or amount change, which can clear it.
-    // An existing line that was never tagged is repaired here instead of being left untagged.
-    if (!setVendorBillLineCostCategory(bill, row)) {
+
+    // Applied last and verified. This also stamps the marker on a line that had none, so a
+    // repaired legacy line becomes provably owned and later appends merge into it without
+    // asking the user anything - but only if the marker really took, hence the read-back.
+    const problem = applyVendorBillCostLineIdentity(bill, row);
+    if (problem) {
+      log.error({ title: 'LCM Vendor Bill line consolidation abandoned', details: problem });
       cancelCurrentLine(bill);
       return false;
     }
@@ -1495,6 +1615,9 @@ define(
     const matches = [];
     const lineCount = getLineCount(bill, 'item');
     const allowUnmarkedLines = Boolean(options && options.allowUnmarkedLines);
+    // Optional out-parameter: marked lines whose item no longer matches, for the caller to
+    // report. They are never returned as matches.
+    const divergentLines = (options && options.divergentLines) || null;
     const sourceKey = buildVendorBillSourceKey(row);
     const billAllocationMethod = getVendorBillLandedCostMethodTextFromRecord(bill);
     const rowAllocationMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
@@ -1514,6 +1637,26 @@ define(
 
       if (lineSourceKey) {
         if (!sourceKey || lineSourceKey !== sourceKey) continue;
+
+        // The marker proves who wrote the line. It does not prove the line still holds what
+        // was written: the item can be edited afterwards while the hidden column stays put,
+        // and adding an amount to an item the Landed Cost row does not name would be wrong
+        // in a way nobody would notice. Such a line is reported and left alone.
+        if (compareCostIdentity(item, itemText, row.billItem, row.billItemText) !== 'match') {
+          if (divergentLines) {
+            divergentLines.push({
+              line,
+              itemText: itemText || item,
+              expectedItemText: row.billItemText || row.billItem,
+            });
+          }
+          log.error({
+            title: 'LCM Vendor Bill marked line no longer carries its own item',
+            details: `Line ${line} carries marker ${lineSourceKey} but its item is now "${itemText || item}" instead of "${row.billItemText || row.billItem}". It is left untouched.`,
+          });
+          continue;
+        }
+
         matches.push({
           line,
           amount: getSublistValue(bill, 'item', 'amount', line),
@@ -1600,17 +1743,28 @@ define(
     setCurrentIfPresent(bill, 'item', 'amount', row.amount);
     setCurrentIfPresent(bill, 'item', 'description', row.memo || row.costCategoryText);
     setClassifications(bill, 'item', row);
-    setVendorBillLineSourceKey(bill, row);
-    // Set last: NetSuite re-sources the line when item/rate change, which can clear it.
-    if (!setVendorBillLineCostCategory(bill, row)) {
-      // An untagged cost line is not a partial success. It cannot be picked up later as a
-      // landed cost source, so committing it would save a Bill that looks right, mark the
-      // source rows Created, and quietly deliver nothing. Fail instead, before the save.
+    // Applied last, because NetSuite re-sources the line when item, rate or amount change.
+    const problem = applyVendorBillCostLineIdentity(bill, row);
+    if (problem) {
+      // Not a partial success. A line missing its category can never be picked up as a
+      // landed cost source, and one missing its marker can never be recognised again, so
+      // committing either would save a Bill that looks right, mark the source rows Created,
+      // and quietly deliver nothing. Fail instead, before anything is saved.
       cancelCurrentLine(bill);
-      throw new Error(describeUntaggedCostLine(row));
+      throw new Error(problem);
     }
     bill.commitLine({ sublistId: 'item' });
     return true;
+  }
+
+  function describeUnmarkedCostLine(row) {
+    return (
+      `Landed Cost row ${row.id}: the Vendor Bill item line could not be stamped with its LCM ` +
+      `Source Key (${TRANSACTION_FIELDS.vendorBillLine.sourceKey}). No Vendor Bill was saved. Without ` +
+      'that marker the line cannot be recognised later, so appending to this Bill would add a ' +
+      'duplicate line instead of merging. Check that the LCM Source Key transaction column is ' +
+      'deployed and applies to purchase transactions.'
+    );
   }
 
   function describeUntaggedCostLine(row) {
@@ -1902,7 +2056,7 @@ define(
     return false;
   }
 
-  function createJournalEntry(group) {
+  function prepareJournalEntry(group) {
     const journal = group.createdTransactionId
       ? record.load({ type: record.Type.JOURNAL_ENTRY, id: group.createdTransactionId, isDynamic: true })
       : record.create({ type: record.Type.JOURNAL_ENTRY, isDynamic: true });
@@ -1920,8 +2074,18 @@ define(
       addJournalLine(journal, row, 'credit');
     });
 
-    const id = journal.save({ enableSourcing: true, ignoreMandatoryFields: false });
-    return makeTransactionResult('Journal Entry', record.Type.JOURNAL_ENTRY, id, group.createdTransactionId ? 'Appended' : 'Created');
+    return {
+      group,
+      save() {
+        const id = journal.save({ enableSourcing: true, ignoreMandatoryFields: false });
+        return makeTransactionResult(
+          'Journal Entry',
+          record.Type.JOURNAL_ENTRY,
+          id,
+          group.createdTransactionId ? 'Appended' : 'Created'
+        );
+      },
+    };
   }
 
   function addJournalLine(journal, row, side) {
