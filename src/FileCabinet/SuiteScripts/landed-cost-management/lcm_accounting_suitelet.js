@@ -202,8 +202,9 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         <h3>Preview Vendor Bill Line Repair${preview.includeLegacyLines ? ' (including unmarked lines)' : ''}</h3>
         <p>Created Vendor Bills: ${preview.bills.length}. Bills needing repair: ${
           preview.bills.filter((plan) => plan.needsRepair).length
-        }.</p>
+        }. Cost lines on those Bills: ${preview.billLineCount}, of which ${preview.markedLineCount} carry an LCM Source Key and ${preview.legacyCandidateCount} do not.</p>
         ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
+        ${preview.notices.length ? `<p class="lcm-muted">${preview.notices.map(escapeHtml).join('<br>')}</p>` : ''}
         ${renderBillRepairPlans(preview.bills)}
         ${renderLegacyLines(preview)}
         <p class="lcm-muted">Every line this tool generates carries a hidden <strong>LCM Source Key</strong> naming the LCM record and the merge group it belongs to. That marker is what makes a line safe to rewrite or remove, so by default only marked lines are consolidated. Lines belonging to another LCM record, and lines nobody marked, are never touched.</p>
@@ -217,7 +218,6 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
   // Unmarked lines predate the marker or were added by hand, and nothing in the data can tell
   // those two apart. They are therefore listed individually and merged only on the user's say-so.
   function renderLegacyLines(preview) {
-    if (!preview.includeLegacyLines) return '';
     const rows = preview.bills
       .reduce(
         (all, plan) => all.concat(plan.legacyLines.map((line) => Object.assign({ bill: plan.transactionNumber }, line))),
@@ -234,19 +234,24 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         </tr>`
       )
       .join('');
-    if (!rows) return '<h4>Unmarked lines</h4><p class="lcm-muted">None found.</p>';
+    if (!rows) return '';
+    const heading = preview.includeLegacyLines
+      ? `<h4 class="lcm-error">Unmarked lines that would be merged and removed</h4>
+         <p class="lcm-error">These lines carry no LCM Source Key, so this tool cannot prove it created them. They either predate the marker or were added to the Bill by hand. Read every row below before confirming: anything listed here that you recognise as a manual entry will be merged into one line and the extra lines deleted.</p>`
+      : `<h4>Unmarked lines found on these Bills</h4>
+         <p class="lcm-muted">These cost lines carry no LCM Source Key, so they are <strong>not</strong> repaired by this preview. They are what a Vendor Bill generated before the marker existed looks like. To consolidate them, open the unmarked-line preview linked below and confirm them there.</p>`;
     return `
-      <h4 class="lcm-error">Unmarked lines that would be merged and removed</h4>
-      <p class="lcm-error">These lines carry no LCM Source Key, so this tool cannot prove it created them. They either predate the marker or were added to the Bill by hand. Read every row below before confirming: anything listed here that you recognise as a manual entry will be merged into one line and the extra lines deleted.</p>
+      ${heading}
       <table class="lcm-table"><thead><tr><th>Bill</th><th>Line</th><th>LC Cost Category</th><th>LC Cost Item</th><th>Amount</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>
     `;
   }
 
   function renderLegacyInvitation(preview, legacyUrl) {
     if (preview.includeLegacyLines || !legacyUrl) return '';
-    return `<p class="lcm-muted">Repairing a Vendor Bill generated before the LCM Source Key existed needs its unmarked lines included. <a href="${escapeHtml(
-      legacyUrl
-    )}">Preview the repair including unmarked lines</a> - every such line is listed individually there for you to check before anything is changed.</p>`;
+    if (!preview.legacyCandidateCount) return '';
+    return `<p><strong><a href="${escapeHtml(legacyUrl)}">Preview the repair including the ${
+      preview.legacyCandidateCount
+    } unmarked line(s) &rarr;</a></strong></p><p class="lcm-muted">Every unmarked line is listed individually there for you to check, and nothing is changed until you confirm on that page.</p>`;
   }
 
   function renderBillRepairPlans(bills) {
@@ -258,11 +263,19 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
           <td>${escapeHtml(plan.vendorText)}</td>
           <td>${escapeHtml(plan.currencyText)}</td>
           <td>${plan.sourceRowCount}</td>
+          <td>${plan.billLineCount}</td>
+          <td>${plan.markedLineCount}</td>
           <td>${plan.targetLineCount}</td>
           <td>${plan.duplicateLineCount}</td>
           <td>${plan.untaggedLineCount}</td>
           <td>${plan.legacyLineCount}</td>
-          <td>${plan.needsRepair ? 'Consolidate duplicate cost lines' : 'Nothing to consolidate'}</td>
+          <td>${
+            plan.needsRepair
+              ? 'Consolidate cost lines'
+              : plan.legacyLineCount
+              ? 'Needs the unmarked-line preview'
+              : 'Nothing to consolidate'
+          }</td>
         </tr>`
       )
       .join('');
@@ -270,7 +283,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
       .reduce((all, plan) => all.concat(plan.blockedGroups.map((text) => `${plan.transactionNumber}: ${text}`)), [])
       .map((text) => `<li>${escapeHtml(text)}</li>`)
       .join('');
-    return `<table class="lcm-table"><thead><tr><th>Bill</th><th>Vendor</th><th>Currency</th><th>LCM Rows</th><th>Target Lines</th><th>Duplicate Lines</th><th>Untagged Lines</th><th>Unmarked Lines</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
+    return `<table class="lcm-table"><thead><tr><th>Bill</th><th>Vendor</th><th>Currency</th><th>LCM Rows</th><th>Bill Lines</th><th>Marked</th><th>Target Lines</th><th>Duplicate Lines</th><th>Untagged Lines</th><th>Unmarked Lines</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
       blocked
         ? `<h4>Not repairable - left untouched</h4><ul>${blocked}</ul>`
         : ''

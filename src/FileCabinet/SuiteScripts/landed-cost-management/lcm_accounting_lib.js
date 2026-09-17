@@ -270,6 +270,7 @@ define(
       includeLegacyLines,
       bills: [],
       errors: [],
+      notices: [],
     };
 
     if (!preview.parentId) {
@@ -305,12 +306,31 @@ define(
     });
 
     preview.legacyCandidateCount = preview.bills.reduce((total, plan) => total + plan.legacyLineCount, 0);
+    preview.markedLineCount = preview.bills.reduce((total, plan) => total + plan.markedLineCount, 0);
+    preview.billLineCount = preview.bills.reduce((total, plan) => total + plan.billLineCount, 0);
+
     const repairable = preview.bills.filter((plan) => plan.needsRepair);
     if (!preview.errors.length && !repairable.length) {
-      preview.errors.push(
-        includeLegacyLines
-          ? 'No duplicate or untagged cost lines were found on the created Vendor Bills.'
-          : 'No duplicate or untagged cost lines carrying this LCM record\'s line marker were found on the created Vendor Bills.'
+      if (!includeLegacyLines && preview.legacyCandidateCount) {
+        preview.errors.push(
+          `${preview.legacyCandidateCount} cost line(s) on these Vendor Bills carry no LCM Source Key, so they are not ` +
+            'repaired by default. Open the unmarked-line preview linked below to see each one and confirm it.'
+        );
+      } else {
+        preview.errors.push(
+          includeLegacyLines
+            ? 'No duplicate or untagged cost lines were found on the created Vendor Bills.'
+            : 'No duplicate or untagged cost lines carrying this LCM record\'s line marker were found on the created Vendor Bills.'
+        );
+      }
+    }
+    // A notice, never an error: it must not block the unmarked-line repair, which is precisely
+    // the flow for Bills whose lines carry no marker.
+    if (preview.billLineCount && !preview.markedLineCount) {
+      preview.notices.push(
+        `None of the ${preview.billLineCount} cost line(s) on these Vendor Bills carries an LCM Source Key. If any of ` +
+          `them was generated after that column was deployed, the column (${TRANSACTION_FIELDS.vendorBillLine.sourceKey}) ` +
+          'is not reaching the Vendor Bill form and must be fixed before new Bills will merge correctly.'
       );
     }
     preview.ok = preview.errors.length === 0 && repairable.length > 0;
@@ -336,6 +356,11 @@ define(
       groups: [],
       mergedRows,
       includeLegacyLines: Boolean(includeLegacyLines),
+      // Straight facts about the Bill, independent of what this run would change. If a Bill
+      // this tool generated shows zero marked lines, the marker column is not reaching the
+      // Vendor Bill form and that is the thing to fix - not the Bill.
+      billLineCount: getLineCount(bill, 'item'),
+      markedLineCount: countVendorBillMarkedLines(bill),
       needsRepair: false,
     };
 
@@ -364,7 +389,17 @@ define(
       if (divergentLines.length) return;
       const lineTotal = sumVendorBillLineAmounts(lines);
       const untagged = lines.filter((line) => !line.hasCategory).length;
-      const unmarked = lines.filter((line) => !line.marked);
+
+      // Unmarked lines are deliberately not returned above unless legacy mode asked for
+      // them - but the default preview still has to SAY they are there, otherwise it reports
+      // 'nothing to consolidate' for a Bill that visibly has duplicates and gives the user no
+      // reason to open the unmarked-line preview. So they are always looked up for reporting,
+      // and only acted on when the user has confirmed them.
+      const unmarked = includeLegacyLines
+        ? lines.filter((line) => !line.marked)
+        : findMatchingVendorBillCostLines(bill, mergedRow, { allowUnmarkedLines: true }).filter(
+            (line) => !line.marked
+          );
       const group = {
         lineKey: mergedRow.lineKey,
         costCategoryText: mergedRow.costCategoryText || mergedRow.costItemMapText || '',
@@ -408,6 +443,15 @@ define(
       plan.untaggedLineCount > 0 ||
       (plan.includeLegacyLines && plan.legacyLineCount > 0);
     return plan;
+  }
+
+  function countVendorBillMarkedLines(bill) {
+    const count = getLineCount(bill, 'item');
+    let marked = 0;
+    for (let line = 0; line < count; line += 1) {
+      if (getVendorBillLineSourceKey(bill, line)) marked += 1;
+    }
+    return marked;
   }
 
   function repairCreatedVendorBillLines(parentId, options) {
@@ -1426,6 +1470,15 @@ define(
     return `LCM${parentId}::${row.lineKey || buildVendorBillLineKey(row)}`;
   }
 
+  function listSublistFieldIds(rec, sublistId) {
+    try {
+      const fieldIds = rec.getSublistFields({ sublistId }) || [];
+      return fieldIds.join(', ') || '(none reported)';
+    } catch (error) {
+      return `(could not be listed: ${error.message || error})`;
+    }
+  }
+
   function getVendorBillLineSourceKey(bill, line) {
     return normalizeValue(getSublistValue(bill, 'item', TRANSACTION_FIELDS.vendorBillLine.sourceKey, line)).trim();
   }
@@ -1452,7 +1505,10 @@ define(
 
     log.error({
       title: 'LCM Vendor Bill line marker not applied',
-      details: `Landed Cost row ${row.id}: wrote "${sourceKey}" to ${fieldId} but read back "${applied}". The line column is missing from this Vendor Bill form, or it rejected the value.`,
+      details:
+        `Landed Cost row ${row.id}: wrote "${sourceKey}" to ${fieldId} but read back "${applied}". ` +
+        `The column is missing from this Vendor Bill form, or it rejected the value. ` +
+        `Item sublist columns on this form: ${listSublistFieldIds(bill, 'item')}`,
     });
     return false;
   }
