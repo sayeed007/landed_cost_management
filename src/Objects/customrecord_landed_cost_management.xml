@@ -187,6 +187,47 @@
         </customfieldfilter>
       </customfieldfilters>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_lcm_shipment_status">
+      <accesslevel>2</accesslevel>
+      <aidescription></aidescription>
+      <allowquickadd>F</allowquickadd>
+      <applyformatting>F</applyformatting>
+      <checkspelling>F</checkspelling>
+      <defaultchecked>F</defaultchecked>
+      <defaultselection></defaultselection>
+      <defaultvalue></defaultvalue>
+      <description>Shipment Status</description>
+      <displayheight></displayheight>
+      <displaytype>NORMAL</displaytype>
+      <displaywidth></displaywidth>
+      <dynamicdefault></dynamicdefault>
+      <enabletextenhance>F</enabletextenhance>
+      <encryptatrest>F</encryptatrest>
+      <fieldtype>SELECT</fieldtype>
+      <globalsearch>F</globalsearch>
+      <help></help>
+      <isformula>F</isformula>
+      <ismandatory>F</ismandatory>
+      <isparent>F</isparent>
+      <label>Shipment Status</label>
+      <linktext></linktext>
+      <maxlength></maxlength>
+      <maxvalue></maxvalue>
+      <minvalue></minvalue>
+      <onparentdelete>NO_ACTION</onparentdelete>
+      <parentsubtab></parentsubtab>
+      <rolerestrict>F</rolerestrict>
+      <searchcomparefield></searchcomparefield>
+      <searchdefault></searchdefault>
+      <searchlevel>2</searchlevel>
+      <selectrecordtype>[scriptid=customlist2527]</selectrecordtype>
+      <showinlist>T</showinlist>
+      <sourcefilterby></sourcefilterby>
+      <sourcefrom></sourcefrom>
+      <sourcelist></sourcelist>
+      <storevalue>T</storevalue>
+      <subtab></subtab>
+    </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_lcm_shipment_number">
       <accesslevel>2</accesslevel>
       <aidescription></aidescription>
@@ -1049,6 +1090,20 @@
       <subtab></subtab>
     </customrecordcustomfield>
   </customrecordcustomfields>
+  <permissions>
+    <permission>
+      <permittedlevel>FULL</permittedlevel>
+      <permittedrole>ADMINISTRATOR</permittedrole>
+      <restriction></restriction>
+    </permission>
+  </permissions>
+  <links>
+    <link>
+      <linkcategory>BASICLISTSACCOUNTING</linkcategory>
+      <linklabel>Digital Landed Cost Management</linklabel>
+      <linktasktype>LIST</linktasktype>
+    </link>
+  </links>
   <subtabs>
     <subtab scriptid="tab_1978_9385847_137">
       <tabparent></tabparent>

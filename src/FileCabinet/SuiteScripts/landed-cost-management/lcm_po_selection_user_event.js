@@ -39,10 +39,6 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
       FIELDS.lcmLandedCosts.department,
       FIELDS.lcmLandedCosts.class,
     ]);
-    hideSublistFields(context.form, SUBLISTS.lcmItems, [
-      FIELDS.lcmItems.poCurrency,
-      FIELDS.lcmItems.quantityBill,
-    ]);
     disableSublistFields(context.form, SUBLISTS.lcmItems, [
       FIELDS.lcmItems.purchaseOrder,
       FIELDS.lcmItems.item,
@@ -233,7 +229,7 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
 
   function orderHeaderFields(form) {
     const f = FIELDS.landedCostManagement;
-    moveBodyFieldBefore(form, f.selectedPurchaseOrders, f.shipmentNumber);
+    moveBodyFieldBefore(form, f.selectedPurchaseOrders, f.shipmentStatus);
     moveBodyFieldBefore(form, f.subsidiary, f.selectedPurchaseOrders);
     moveBodyFieldBefore(form, f.vendor, f.subsidiary);
   }

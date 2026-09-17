@@ -228,6 +228,6 @@ On save:
 
 ## Notes
 
-The original `PO Currency` field (`custrecord_lcmitems_po_currency`) is configured as a Currency amount field, not a List/Record Currency field. It is hidden as legacy metadata. Visible PO currency text is stored in `custrecord_lcmitems_po_currency_text`.
+The legacy amount-type PO Currency field was removed. Visible PO currency text is stored in `custrecord_lcmitems_po_currency_text`.
 
 If the child sublist is not editable through `currentRecord`, keep the User Event deployed; the item lines will still be corrected after save, but the immediate on-change UX will need a custom Suitelet form or an editable child-record sublist configuration.

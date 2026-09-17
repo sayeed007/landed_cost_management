@@ -15,6 +15,7 @@ define([], () => {
       vendor: 'custrecord_lcm_vendor',
       subsidiary: 'custrecord_lcm_subsidiary',
       selectedPurchaseOrders: 'custrecord_lcm_selected_pos',
+      shipmentStatus: 'custrecord_lcm_shipment_status',
       shipmentNumber: 'custrecord_lcm_shipment_number',
     },
     lcmItems: {
@@ -26,10 +27,8 @@ define([], () => {
       quantityReceipt: 'custrecord_lcmitems_receipt',
       expectedQuantityReceipt: 'custrecord_lcmitem_ex_receipt',
       quantityRemaining: 'custrecord_lcmitems_quantity_remaining',
-      quantityBill: 'custrecord_lcmitems_quantity_bill',
       billStatus: 'custrecord_lcmitems_bill_status',
       unitType: 'custrecord_lcmitems_unit_type',
-      poCurrency: 'custrecord_lcmitems_po_currency',
       poCurrencyText: 'custrecord_lcmitems_po_currency_text',
       poRate: 'custrecord_lcmitems_po_rate',
       poValue: 'custrecord_lcmitems_po_value',

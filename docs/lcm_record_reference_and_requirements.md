@@ -20,10 +20,12 @@ This document is the working record and field reference for the Landed Cost Mana
 
 | Name | Field ID | Type | What this is for |
 | --- | --- | --- | --- |
+| Purchase Order Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor used only for selected PO filtering and validation. Landed Cost row `Vendor Name` drives generated Vendor Bills. |
+| Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
+| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which only lists POs that have at least one receivable open item line for the selected Purchase Order Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
+| Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Shipment status classification. |
 | Shipment Number | `custrecord_lcm_shipment_number` | Text | Legacy hidden shipment number text field. Shipment numbering now uses the custom record auto-number/name with `SHIP-` prefix and 5 minimum digits. |
 | Shipment Date | `custrecord_lcm_shipment_date` | Date | Shipment date for the landed cost record. |
-| Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
-| Purchase Order Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor used only for selected PO filtering and validation. Landed Cost row `Vendor Name` drives generated Vendor Bills. |
 | LC Loan Number | `custrecord_lcm_lc_laon_number` | Text | LC loan number. Existing spelling in NetSuite is `laon`. |
 | Master PI Number | `custrecord_lcm_master_pi_number` | Text | Master PI reference. |
 | LC Number | `custrecord_lcm_lc_number` | Text | Letter of Credit number. |
@@ -42,7 +44,6 @@ This document is the working record and field reference for the Landed Cost Mana
 | LC Cover Note No. | `custrecord_lc_cover_note_no` | Text | LC cover note number. |
 | IRC NO. | `custrecord_lcm_irc_no` | Text | IRC reference number. |
 | Air/ Vassel Name | `custrecord_lcm_air_vassel_name` | Text | Vessel/air carrier name. Existing label spelling is `Vassel`. |
-| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which only lists POs that have at least one receivable open item line for the selected Purchase Order Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
 | Unused PO Line Key | `custrecord_lcmitems_po_line_key` | Hidden text | Accidental parent-scoped field from an early deployment attempt. It is hidden and not used by scripts. Correct child line key is `custrecord_lcmitems_source_line_key`. |
 
 ## 2. Child Custom Record: LCM Items
@@ -70,10 +71,8 @@ This document is the working record and field reference for the Landed Cost Mana
 | Expected Quantity Receipt | `custrecord_lcmitem_ex_receipt` | Text | PO line quantity still open for receipt: remaining quantity when partially received, otherwise PO quantity. |
 | Quantity Receipt | `custrecord_lcmitems_receipt` | Text | Editable quantity that this LCM record is going to receive and bill. Defaults to Expected Quantity Receipt. |
 | Quantity Remaining | `custrecord_lcmitems_quantity_remaining` | Text | Computed as Expected Quantity Receipt minus Quantity Receipt. |
-| Quantity Bill | `custrecord_lcmitems_quantity_bill` | Currency | Deprecated hidden field. Removed from the user-facing Items sublist. |
 | Receive Status | `custrecord_lcmitems_bill_status` | Text | `full` when Expected Quantity Receipt equals Quantity Receipt; otherwise `partial`. Existing field ID is retained for compatibility. |
-| PO Currency | `custrecord_lcmitems_po_currency_text` | Text | PO transaction currency text. Replaces the old amount-type `custrecord_lcmitems_po_currency` field in the user-facing sublist. |
-| Legacy PO Currency Amount | `custrecord_lcmitems_po_currency` | Hidden currency amount | Deprecated amount-type field. It could not display currency names and is hidden from the user-facing Items sublist. |
+| PO Currency | `custrecord_lcmitems_po_currency_text` | Text | PO transaction currency text. |
 | Exchange Rate | `custrecord_lcmitems_exchange_rate` | Text | Exchange rate from the PO line/header search result. |
 | PO Rate | `custrecord_lcmitems_po_rate` | Currency | PO line rate. |
 | PO Value | `custrecord_lcmitems_po_value` | Currency | PO Rate multiplied by PO Exchange Rate and editable Quantity Receipt. Stored in base currency for allocation comparison. |

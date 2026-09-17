@@ -1,6 +1,6 @@
 # Landed Cost Management - Implemented Requirements
 
-Last updated: 2026-09-10
+Last updated: 2026-09-17
 
 This document tracks implemented behavior for the Landed Cost Management customization. Extend this file chunk by chunk as new requirements are added. For record and field references, see [lcm_record_reference_and_requirements.md](./lcm_record_reference_and_requirements.md).
 
@@ -11,6 +11,8 @@ Users should select Purchase Orders once at the root/header level instead of cho
 Implemented behavior:
 
 - Added root field `Purchase Order Vendor` (`custrecord_lcm_vendor`) as the header vendor for PO selection only.
+- Root field order is source-controlled in `customrecord_landed_cost_management.xml`: `Purchase Order Vendor`, `Subsidiary`, `Selected Purchase Orders`, then `Shipment Status`; the remaining root fields retain their existing order.
+- The parent User Event repeats that order at runtime by inserting `Purchase Order Vendor`, `Subsidiary`, and `Selected Purchase Orders` immediately before `Shipment Status`, because the preferred custom entry form can otherwise preserve an older UI layout.
 - Added root field `Selected Purchase Orders` (`custrecord_lcm_selected_pos`) as a multi-select Purchase Order field.
 - The root `Subsidiary` field (`custrecord_lcm_subsidiary`) is sourced from the selected Purchase Order Vendor and disabled on the form by User Event `beforeLoad`.
 - The root `Selected Purchase Orders` field is disabled on the form and populated through the `Select Receivable POs` Suitelet button.
@@ -129,7 +131,7 @@ Open caveat:
 ## 8. Known Notes and Cleanup Items
 
 - `custrecord_lcmitems_po_line_key` exists on the parent record due to an early failed deployment. It is hidden, relabeled as `Unused PO Line Key`, and not used by scripts.
-- The old `PO Currency` field (`custrecord_lcmitems_po_currency`) is a Currency amount field, not a Currency list/reference field, so it is hidden. The visible PO currency value is stored as text in `custrecord_lcmitems_po_currency_text`.
+- The deprecated Quantity Bill and legacy amount-type PO Currency fields were removed. The visible PO currency value is stored as text in `custrecord_lcmitems_po_currency_text`.
 - PO item sync is now reconcile-by-key, not truncate-and-rebuild. Matched generated item rows keep user/system fields that are not sourced from the PO, including `Track Item`, editable `Quantity Receipt`, `Unit Landed Cost`, `Total Unit Cost`, and derived values.
 - After any Landed Cost row has created accounting, changing the header selected PO list is blocked to protect posted transaction references and item-level allocation values. The `Select Receivable POs` button remains visible in edit mode and shows the lock reason instead of opening the selector.
 - Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts always apply `LC Bill` when Vendor Bills are generated.

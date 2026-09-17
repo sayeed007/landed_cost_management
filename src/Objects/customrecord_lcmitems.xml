@@ -433,47 +433,6 @@
       <storevalue>T</storevalue>
       <subtab></subtab>
     </customrecordcustomfield>
-    <customrecordcustomfield scriptid="custrecord_lcmitems_quantity_bill">
-      <accesslevel>2</accesslevel>
-      <aidescription></aidescription>
-      <allowquickadd>F</allowquickadd>
-      <applyformatting>T</applyformatting>
-      <checkspelling>F</checkspelling>
-      <defaultchecked>F</defaultchecked>
-      <defaultselection></defaultselection>
-      <defaultvalue></defaultvalue>
-      <description>Deprecated quantity-billed value from the source PO line. Hidden after customer demo feedback.</description>
-      <displayheight></displayheight>
-      <displaytype>HIDDEN</displaytype>
-      <displaywidth></displaywidth>
-      <dynamicdefault></dynamicdefault>
-      <enabletextenhance>F</enabletextenhance>
-      <encryptatrest>F</encryptatrest>
-      <fieldtype>CURRENCY</fieldtype>
-      <globalsearch>T</globalsearch>
-      <help></help>
-      <isformula>F</isformula>
-      <ismandatory>F</ismandatory>
-      <isparent>F</isparent>
-      <label>Deprecated Quantity Bill</label>
-      <linktext></linktext>
-      <maxlength></maxlength>
-      <maxvalue></maxvalue>
-      <minvalue></minvalue>
-      <onparentdelete></onparentdelete>
-      <parentsubtab></parentsubtab>
-      <rolerestrict>F</rolerestrict>
-      <searchcomparefield></searchcomparefield>
-      <searchdefault></searchdefault>
-      <searchlevel>2</searchlevel>
-      <selectrecordtype></selectrecordtype>
-      <showinlist>F</showinlist>
-      <sourcefilterby></sourcefilterby>
-      <sourcefrom></sourcefrom>
-      <sourcelist></sourcelist>
-      <storevalue>T</storevalue>
-      <subtab></subtab>
-    </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_lcmitems_bill_status">
       <accesslevel>2</accesslevel>
       <aidescription></aidescription>
@@ -550,47 +509,6 @@
       <searchlevel>2</searchlevel>
       <selectrecordtype></selectrecordtype>
       <showinlist>T</showinlist>
-      <sourcefilterby></sourcefilterby>
-      <sourcefrom></sourcefrom>
-      <sourcelist></sourcelist>
-      <storevalue>T</storevalue>
-      <subtab></subtab>
-    </customrecordcustomfield>
-    <customrecordcustomfield scriptid="custrecord_lcmitems_po_currency">
-      <accesslevel>2</accesslevel>
-      <aidescription></aidescription>
-      <allowquickadd>F</allowquickadd>
-      <applyformatting>T</applyformatting>
-      <checkspelling>F</checkspelling>
-      <defaultchecked>F</defaultchecked>
-      <defaultselection></defaultselection>
-      <defaultvalue></defaultvalue>
-      <description>Legacy amount-type PO Currency field. Use custrecord_lcmitems_po_currency_text for visible currency text.</description>
-      <displayheight></displayheight>
-      <displaytype>HIDDEN</displaytype>
-      <displaywidth></displaywidth>
-      <dynamicdefault></dynamicdefault>
-      <enabletextenhance>F</enabletextenhance>
-      <encryptatrest>F</encryptatrest>
-      <fieldtype>CURRENCY</fieldtype>
-      <globalsearch>T</globalsearch>
-      <help></help>
-      <isformula>F</isformula>
-      <ismandatory>F</ismandatory>
-      <isparent>F</isparent>
-      <label>Legacy PO Currency Amount</label>
-      <linktext></linktext>
-      <maxlength></maxlength>
-      <maxvalue></maxvalue>
-      <minvalue></minvalue>
-      <onparentdelete></onparentdelete>
-      <parentsubtab></parentsubtab>
-      <rolerestrict>F</rolerestrict>
-      <searchcomparefield></searchcomparefield>
-      <searchdefault></searchdefault>
-      <searchlevel>2</searchlevel>
-      <selectrecordtype></selectrecordtype>
-      <showinlist>F</showinlist>
       <sourcefilterby></sourcefilterby>
       <sourcefrom></sourcefrom>
       <sourcelist></sourcelist>
