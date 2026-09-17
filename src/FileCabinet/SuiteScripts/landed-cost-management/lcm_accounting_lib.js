@@ -209,6 +209,198 @@ define(
     };
   }
 
+  // Explicit, opt-in repair for Vendor Bills that were generated before source rows were
+  // merged in memory. It only consolidates duplicate generated cost lines that belong to this
+  // LCM record, and it is total-preserving: the surviving line carries the sum of the lines it
+  // replaces, never the Landed Cost row total, so a Bill's total can never move. Nothing else
+  // on the Bill is touched, and no automatic flow calls it.
+  function buildVendorBillRepairPreview(parentId) {
+    const preview = {
+      ok: false,
+      mode: 'repair',
+      modeText: 'Vendor Bill Line Repair',
+      parentId: String(parentId || ''),
+      bills: [],
+      errors: [],
+    };
+
+    if (!preview.parentId) {
+      preview.errors.push('Missing Landed Cost Management record ID.');
+      return preview;
+    }
+
+    assertParentAccessible(preview.parentId);
+    const createdRows = getCreatedBillRows(parentId);
+    if (!createdRows.length) {
+      preview.errors.push('No created Vendor Bill landed-cost rows are available to repair.');
+      return preview;
+    }
+
+    const rowsByBill = {};
+    const order = [];
+    createdRows.forEach((row) => {
+      const billId = normalizeValue(row.createdTransactionId).trim();
+      if (!billId) return;
+      if (!rowsByBill[billId]) {
+        rowsByBill[billId] = [];
+        order.push(billId);
+      }
+      rowsByBill[billId].push(row);
+    });
+
+    order.forEach((billId) => {
+      try {
+        preview.bills.push(planVendorBillLineRepair(billId, rowsByBill[billId]));
+      } catch (error) {
+        preview.errors.push(`Vendor Bill ${billId} could not be read: ${error.message || error}`);
+      }
+    });
+
+    const repairable = preview.bills.filter((plan) => plan.needsRepair);
+    if (!preview.errors.length && !repairable.length) {
+      preview.errors.push('No duplicate or untagged generated cost lines were found on the created Vendor Bills.');
+    }
+    preview.ok = preview.errors.length === 0 && repairable.length > 0;
+    return preview;
+  }
+
+  function planVendorBillLineRepair(billId, billRows) {
+    const bill = record.load({ type: record.Type.VENDOR_BILL, id: billId, isDynamic: false });
+    const mergedRows = buildMergedVendorBillRows(billRows);
+    const plan = {
+      billId: String(billId),
+      transactionNumber: (billRows[0] && billRows[0].transactionNumber) || String(billId),
+      vendorText: (billRows[0] && billRows[0].vendorText) || '',
+      currencyText: (billRows[0] && billRows[0].currencyText) || '',
+      sourceRowCount: billRows.length,
+      targetLineCount: mergedRows.length,
+      duplicateLineCount: 0,
+      untaggedLineCount: 0,
+      unmatchedGroupCount: 0,
+      amountWarnings: [],
+      groups: [],
+      mergedRows,
+      needsRepair: false,
+    };
+
+    mergedRows.forEach((mergedRow) => {
+      const lines = findMatchingVendorBillCostLines(bill, mergedRow);
+      const lineTotal = sumVendorBillLineAmounts(lines);
+      const untagged = lines.filter((line) => !line.hasCategory).length;
+      const group = {
+        lineKey: mergedRow.lineKey,
+        costCategoryText: mergedRow.costCategoryText || mergedRow.costItemMapText || '',
+        billItemText: mergedRow.billItemText || '',
+        sourceRowIds: mergedRow.sourceRowIds,
+        sourceAmount: mergedRow.amount,
+        matchedLines: lines.map((line) => line.line),
+        matchedLineTotal: lineTotal,
+        untaggedLineCount: untagged,
+      };
+      plan.groups.push(group);
+
+      if (!lines.length) {
+        plan.unmatchedGroupCount += 1;
+        return;
+      }
+      plan.duplicateLineCount += lines.length - 1;
+      plan.untaggedLineCount += untagged;
+      if (roundCurrency(lineTotal) !== roundCurrency(mergedRow.amount)) {
+        plan.amountWarnings.push(
+          `${group.costCategoryText || group.lineKey}: Bill lines total ${lineTotal}, Landed Cost rows total ${mergedRow.amount}. The repair keeps the Bill total unchanged.`
+        );
+      }
+    });
+
+    plan.needsRepair = plan.duplicateLineCount > 0 || plan.untaggedLineCount > 0;
+    return plan;
+  }
+
+  function repairCreatedVendorBillLines(parentId) {
+    const preview = buildVendorBillRepairPreview(parentId);
+    if (!preview.ok) {
+      const error = new Error(preview.errors.join('\n') || 'No Vendor Bill lines to repair.');
+      error.preview = preview;
+      throw error;
+    }
+
+    const repaired = [];
+    let removedLineCount = 0;
+    preview.bills.forEach((plan) => {
+      if (!plan.needsRepair) return;
+      const result = applyVendorBillLineRepair(plan);
+      removedLineCount += result.removedLineCount;
+      repaired.push(result.transaction);
+    });
+
+    return {
+      mode: preview.mode,
+      modeText: preview.modeText,
+      created: repaired,
+      processedRowCount: 0,
+      allocatedRowCount: 0,
+      removedLineCount,
+      skippedRows: [],
+      allocationTargetCount: 0,
+      bills: preview.bills,
+    };
+  }
+
+  function applyVendorBillLineRepair(plan) {
+    const bill = record.load({ type: record.Type.VENDOR_BILL, id: plan.billId, isDynamic: true });
+    let removedLineCount = 0;
+    let consolidatedGroupCount = 0;
+
+    // Re-matched against the freshly loaded record: every removal shifts the line indexes the
+    // preview captured, so the preview is a plan and never a set of coordinates to write to.
+    const handledCostIdentities = {};
+    plan.mergedRows.forEach((mergedRow) => {
+      // Only the first merged row for a given Cost Category / LC Cost Item pair consolidates
+      // its lines. A second row differing only by Allocation Method would otherwise re-match
+      // and re-collapse the same lines.
+      const costIdentity = buildCostIdentity(mergedRow);
+      if (handledCostIdentities[costIdentity]) return;
+      handledCostIdentities[costIdentity] = true;
+
+      const lines = findMatchingVendorBillCostLines(bill, mergedRow);
+      if (!lines.length) return;
+      if (lines.length === 1 && lines[0].hasCategory) return;
+
+      const lineTotal = sumVendorBillLineAmounts(lines);
+      const description = mergeVendorBillLineDescriptions(
+        lines.map((line) => line.description),
+        mergedRow.memo || mergedRow.costCategoryText || mergedRow.billItemText
+      );
+      writeVendorBillCostLine(bill, lines, mergedRow, lineTotal, description);
+      removedLineCount += lines.length - 1;
+      consolidatedGroupCount += 1;
+
+      log.audit({
+        title: 'LCM Vendor Bill line repair',
+        details: `Vendor Bill ${plan.billId}: consolidated lines ${lines
+          .map((line) => line.line)
+          .join(', ')} into one line at ${lineTotal} for key ${mergedRow.lineKey}. Landed Cost rows ${mergedRow.sourceRowIds.join('+')} are unchanged.`,
+      });
+    });
+
+    // Nothing matched on the reloaded record, so the Bill is left exactly as it is rather
+    // than being saved unchanged and picking up a pointless system note.
+    if (!consolidatedGroupCount) {
+      return {
+        removedLineCount: 0,
+        consolidatedGroupCount: 0,
+        transaction: makeTransactionResult('Vendor Bill', record.Type.VENDOR_BILL, plan.billId, 'No change'),
+      };
+    }
+
+    const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
+    return {
+      removedLineCount,
+      consolidatedGroupCount,
+      transaction: makeTransactionResult('Vendor Bill', record.Type.VENDOR_BILL, id, 'Repaired'),
+    };
+  }
+
   function assertParentAccessible(parentId) {
     if (!parentId) throw new Error('Missing Landed Cost Management record ID.');
     record.load({
@@ -366,12 +558,29 @@ define(
   }
 
   function applyCostItemMapDefaults(row) {
+    row.costItemMap = normalizeValue(row.costItemMap).trim();
+    row.costItemMapResolved = false;
+    row.mappedItemId = '';
+    row.mappedItemText = '';
     if (!row.costItemMap) return row;
-    const defaults = getCostItemMapDefaults(row.costItemMap);
-    if (!defaults.costCategory && !defaults.costCategoryText) return row;
 
-    // The mapping selector is the source of truth. Reapply both derived fields so
-    // stale hidden values cannot split otherwise equivalent Vendor Bill lines.
+    const defaults = getCostItemMapDefaults(row.costItemMap);
+    if (!defaults.mappingRecordId) return row;
+
+    // The mapping record is the source of truth for both derived fields. The hidden native
+    // Cost Category and LC Cost Item sourced onto a child row can be stale, or simply differ
+    // between rows carrying the same mapping, so they are rehydrated here - before validation
+    // and before any merge key is built - instead of only being filled in when blank. Rows
+    // that share a mapping share one cached defaults object, so they cannot drift apart.
+    row.costItemMapResolved = true;
+    row.costItemMapText = defaults.costItemMapText || row.costItemMapText;
+
+    // Identity-only copy of the mapped item. It is kept even when that item is inactive, so a
+    // mapping whose item no longer resolves still yields one stable discriminator for every
+    // child row. Line creation keeps using the active item in row.billItem.
+    row.mappedItemId = normalizeValue(defaults.mappedItemId);
+    row.mappedItemText = normalizeValue(defaults.mappedItemText);
+
     if (defaults.costCategory || defaults.costCategoryText) {
       row.costCategory = defaults.costCategory || row.costCategory;
       row.costCategoryText = defaults.costCategoryText || row.costCategoryText;
@@ -398,6 +607,10 @@ define(
       costCategoryText: map.costCategoryText,
       billItem: activeItem.id,
       billItemText: activeItem.text,
+      // Raw mapped item straight off the mapping record, retained even when it is inactive so
+      // callers can still build a stable identity for it.
+      mappedItemId: normalizeValue(map.billItem),
+      mappedItemText: normalizeValue(map.billItemText),
       attemptedItemName: map.billItemText,
       matched: Boolean(map.id && map.costCategory && activeItem.id),
       reason: itemMissing ? activeItem.reason || map.reason : map.reason,
@@ -910,8 +1123,23 @@ define(
     // makes the Bill selectable later as a landed cost source, so it is never gated on the
     // Bill already having something to allocate onto.
     const costLines = [];
-    buildMergedVendorBillRows(group.rows).forEach((row) => {
-      if (addOrMergeVendorBillItemLine(bill, row)) costLines.push(row);
+    const mergedRows = buildMergedVendorBillRows(group.rows);
+    logVendorBillMergePlan(
+      group.createdTransactionId
+        ? `Append to Vendor Bill ${group.createdTransactionId} (group ${group.key})`
+        : `New Vendor Bill (group ${group.key})`,
+      mergedRows
+    );
+    // Two merged rows in one run can share a Cost Category and LC Cost Item and still have
+    // different merge keys, because the Allocation Method also belongs to the key. A Vendor
+    // Bill line carries no allocation method of its own, so the second such row must not be
+    // allowed to match the line the first one just wrote - that would undo the split.
+    const handledCostIdentities = {};
+    mergedRows.forEach((row) => {
+      const costIdentity = buildCostIdentity(row);
+      const forceNewLine = Boolean(handledCostIdentities[costIdentity]);
+      handledCostIdentities[costIdentity] = true;
+      if (addOrMergeVendorBillItemLine(bill, row, { forceNewLine })) costLines.push(row);
     });
 
     // Evaluated after the lines exist; on a new Bill the item sublist is empty up to here.
@@ -936,10 +1164,15 @@ define(
     (rows || []).forEach((row) => {
       const key = buildVendorBillLineKey(row);
       if (!mergedByKey[key]) {
+        // Object.assign keeps the FIRST source row's Effective Date, Location, Department and
+        // Class. Those fields deliberately stay out of the key, so they must not be allowed to
+        // change once the merge group exists.
         mergedByKey[key] = Object.assign({}, row, {
+          lineKey: key,
           amount: 0,
           memo: '',
           sourceRows: [],
+          sourceRowIds: [],
           memoTexts: [],
           memoLookup: {},
         });
@@ -949,6 +1182,7 @@ define(
       const merged = mergedByKey[key];
       merged.amount = roundCurrency((merged.amount || 0) + (row.amount || 0));
       merged.sourceRows.push(row);
+      merged.sourceRowIds.push(row.id);
       addDistinctMemo(merged, row.memo);
     });
 
@@ -961,22 +1195,69 @@ define(
     });
   }
 
-  function buildVendorBillLineKey(row) {
-    return [
-      row.vendor,
-      row.subsidiary,
-      row.currency,
-      getMergeIdentity(row.costCategory, row.costCategoryText || row.costItemMapText),
-      getMergeIdentity(row.billItem, row.billItemText || row.costItemMapText),
-      getMergeIdentity(row.allocationMethod, row.allocationMethodText),
-    ]
-      .map((value) => normalizeValue(value))
-      .join('|');
+  function logVendorBillMergePlan(context, mergedRows) {
+    const rows = mergedRows || [];
+    const plan = rows.map(
+      (merged) => `${merged.sourceRowIds.join('+')} -> qty 1 @ ${merged.amount} [${merged.lineKey}]`
+    );
+    const sourceCount = rows.reduce((total, merged) => total + merged.sourceRows.length, 0);
+    log.audit({
+      title: 'LCM Vendor Bill source merge plan',
+      details: `${context}. Source rows: ${sourceCount}. Bill lines: ${rows.length}. ${plan.join(' | ')}`,
+    });
   }
 
-  function getMergeIdentity(value, text) {
-    const textIdentity = normalizeChoice(text);
-    return textIdentity || normalizeValue(value).trim().toLowerCase();
+  function buildVendorBillLineKey(row) {
+    return [
+      identitySegment('ven', row.vendor, row.vendorText),
+      identitySegment('sub', row.subsidiary, row.subsidiaryText),
+      identitySegment('cur', row.currency, row.currencyText),
+      buildCostIdentity(row),
+      identitySegment('mth', row.allocationMethod, row.allocationMethodText),
+    ].join('|');
+  }
+
+  // Canonical, deterministic identity for the cost a Landed Cost row carries. Internal IDs win
+  // over display text, because the same record can render with different text on different
+  // rows (sourced vs. typed, parent-prefixed item names, mapping-record name vs. category
+  // name). Text is only a fallback for a value that has no internal ID at all.
+  function buildCostIdentity(row) {
+    const category = identitySegment('cat', row.costCategory, row.costCategoryText);
+    const item = identitySegment(
+      'itm',
+      row.billItem || row.mappedItemId,
+      row.billItemText || row.mappedItemText
+    );
+    // Neither derived field resolved. Fall back to the mapping record, which is the field the
+    // user actually picked and so the last deterministic identity available.
+    if (category === 'cat|-' && item === 'itm|-') {
+      return identitySegment('map', row.costItemMap, row.costItemMapText);
+    }
+    return `${category}+${item}`;
+  }
+
+  // '#' marks an internal ID, '~' a normalized label, '-' an unknown value. The field prefix
+  // stops segments colliding with each other once they are joined into a single key.
+  function identitySegment(prefix, value, text) {
+    const id = normalizeValue(value).trim();
+    if (id) return `${prefix}|#${id}`;
+    const label = normalizeChoice(text);
+    if (label) return `${prefix}|~${label}`;
+    return `${prefix}|-`;
+  }
+
+  // Compares one identity-bearing field between a Vendor Bill line and a Landed Cost row.
+  // Returns 'match', 'mismatch', or 'unknown' when the two sides share no comparable form.
+  function compareCostIdentity(lineValue, lineText, rowValue, rowText) {
+    const lineId = normalizeValue(lineValue).trim();
+    const rowId = normalizeValue(rowValue).trim();
+    if (lineId && rowId) return lineId === rowId ? 'match' : 'mismatch';
+
+    const lineLabel = normalizeChoice(lineText);
+    const rowLabel = normalizeChoice(rowText);
+    if (lineLabel && rowLabel) return lineLabel === rowLabel ? 'match' : 'mismatch';
+
+    return 'unknown';
   }
 
   function addDistinctMemo(merged, memo) {
@@ -986,32 +1267,67 @@ define(
     merged.memoTexts.push(memoText);
   }
 
-  function addOrMergeVendorBillItemLine(bill, row) {
-    const existingLines = findMatchingVendorBillCostLines(bill, row);
-    if (!existingLines.length) return addVendorBillItemLine(bill, row);
+  function addOrMergeVendorBillItemLine(bill, row, options) {
+    const lineKey = row.lineKey || buildVendorBillLineKey(row);
+    const existingLines = options && options.forceNewLine ? [] : findMatchingVendorBillCostLines(bill, row);
+    if (!existingLines.length) {
+      log.audit({
+        title: 'LCM Vendor Bill existing line match',
+        details: `No compatible existing line for key ${lineKey}. Adding a new item line for Landed Cost rows ${(
+          row.sourceRowIds || [row.id]
+        ).join('+')} at ${row.amount}.`,
+      });
+      return addVendorBillItemLine(bill, row);
+    }
 
-    const primaryLine = existingLines[0];
-    const mergedAmount = roundCurrency(
-      existingLines.reduce((total, line) => total + (toNumber(line.amount) || 0), 0) + (row.amount || 0)
-    );
+    const existingAmount = sumVendorBillLineAmounts(existingLines);
+    const mergedAmount = roundCurrency(existingAmount + (row.amount || 0));
     const mergedMemo = mergeVendorBillLineDescriptions(
       existingLines.map((line) => line.description),
       row.memo || row.costCategoryText || row.billItemText
     );
 
+    const tagged = writeVendorBillCostLine(bill, existingLines, row, mergedAmount, mergedMemo);
+
+    log.audit({
+      title: 'LCM Vendor Bill existing line match',
+      details:
+        `Merged Landed Cost rows ${(row.sourceRowIds || [row.id]).join('+')} into existing line ${
+          existingLines[0].line
+        }. Key: ${lineKey}. Matched lines: ${existingLines
+          .map((line) => `${line.line}(${line.reason})`)
+          .join(', ')}. Amount ${existingAmount} + ${row.amount || 0} = ${mergedAmount}. Tagged: ${tagged}.`,
+    });
+
+    return tagged;
+  }
+
+  // Writes one consolidated cost line: quantity 1, rate and amount equal to totalAmount, the
+  // merged description, and the row's Cost Category re-stamped. Every matched line after the
+  // first is removed once the first has absorbed the total.
+  function writeVendorBillCostLine(bill, existingLines, row, totalAmount, description) {
+    const primaryLine = existingLines[0];
+
     bill.selectLine({ sublistId: 'item', line: primaryLine.line });
     setCurrentIfPresent(bill, 'item', 'quantity', 1);
-    setCurrentIfPresent(bill, 'item', 'rate', mergedAmount);
-    setCurrentIfPresent(bill, 'item', 'amount', mergedAmount);
-    setCurrentIfPresent(bill, 'item', 'description', mergedMemo);
+    setCurrentIfPresent(bill, 'item', 'rate', totalAmount);
+    setCurrentIfPresent(bill, 'item', 'amount', totalAmount);
+    setCurrentIfPresent(bill, 'item', 'description', description);
+    // Set last: NetSuite re-sources the line when rate or amount change, which can clear it.
+    // An existing line that was never tagged is repaired here instead of being left untagged.
+    const tagged = setVendorBillLineCostCategory(bill, row) || Boolean(primaryLine.hasCategory);
     bill.commitLine({ sublistId: 'item' });
 
-    // Remove duplicate generated lines after the first line has absorbed their amounts.
+    // Descending, so the line indexes captured before the removals stay valid.
     for (let index = existingLines.length - 1; index > 0; index -= 1) {
       bill.removeLine({ sublistId: 'item', line: existingLines[index].line, ignoreRecalc: true });
     }
 
-    return true;
+    return tagged;
+  }
+
+  function sumVendorBillLineAmounts(lines) {
+    return roundCurrency((lines || []).reduce((total, line) => total + (toNumber(line.amount) || 0), 0));
   }
 
   function findMatchingVendorBillCostLines(bill, row) {
@@ -1030,41 +1346,53 @@ define(
       const categoryText = getSublistText(bill, 'item', 'landedcostcategory', line);
       const itemText = getSublistText(bill, 'item', 'item', line);
       const description = getSublistValue(bill, 'item', 'description', line);
-      const categoryMatches =
-        matchesVendorBillLineField(category, categoryText, row.costCategory, row.costCategoryText || row.costItemMapText) ||
-        matchesVendorBillLineField('', description, '', row.costCategoryText || row.costItemMapText);
-      if (!categoryMatches) {
-        continue;
-      }
-      const itemMatches =
-        matchesVendorBillLineField(item, itemText, row.billItem, row.billItemText || row.costItemMapText) ||
-        matchesVendorBillLineField('', description, '', row.billItemText || row.costItemMapText);
-      if (!itemMatches) {
-        continue;
+
+      // The item is compared first and strictly. It is the one identity a saved Vendor Bill
+      // line always carries as an internal ID, so an ID-first comparison cannot be defeated
+      // by sourced or parent-prefixed display text the way a text-first comparison can.
+      const itemResult = compareCostIdentity(item, itemText, row.billItem, row.billItemText);
+      if (itemResult !== 'match') continue;
+
+      const hasCategory = Boolean(normalizeValue(category).trim() || normalizeChoice(categoryText));
+      const categoryResult = compareCostIdentity(category, categoryText, row.costCategory, row.costCategoryText);
+      if (categoryResult === 'mismatch') continue;
+
+      let reason = categoryResult;
+      if (categoryResult !== 'match') {
+        // The line exposes no comparable Cost Category. Absorb it only when it still looks
+        // like a line this tool generated; writeVendorBillCostLine then re-stamps the
+        // category on it. Anything else on the Bill is left untouched.
+        if (hasCategory || !isGeneratedCostLineDescription(description, row)) continue;
+        reason = 'untagged';
       }
 
       matches.push({
         line,
         amount: getSublistValue(bill, 'item', 'amount', line),
         description,
+        hasCategory,
+        reason,
       });
     }
 
     return matches;
   }
 
-  function matchesVendorBillLineField(lineValue, lineText, rowValue, rowText) {
-    const normalizedLineText = normalizeChoice(lineText);
-    const normalizedRowText = normalizeChoice(rowText);
-    if (normalizedLineText && normalizedRowText) return normalizedLineText === normalizedRowText;
+  // True when a Vendor Bill line description is one this tool would have written for this row:
+  // a source memo, the LC Cost Category text, the mapping record name, or the item name. A
+  // blank description also qualifies, because a row with no memo and no category text writes
+  // one. This is only ever a tie-breaker for a line whose Cost Category is missing.
+  function isGeneratedCostLineDescription(description, row) {
+    const normalizedDescription = normalizeChoice(description);
+    if (!normalizedDescription) return true;
 
-    const normalizedLineValue = normalizeValue(lineValue);
-    const normalizedRowValue = normalizeValue(rowValue);
-    if (normalizedLineValue && normalizedRowValue) return normalizedLineValue === normalizedRowValue;
+    const candidates = [row.costCategoryText, row.costItemMapText, row.billItemText, row.memo];
+    (row.sourceRows || []).forEach((sourceRow) => candidates.push(sourceRow.memo));
 
-    const fallbackLineText = normalizeValue(lineText).trim();
-    const fallbackRowText = normalizeValue(rowText).trim();
-    return Boolean(fallbackLineText && fallbackRowText && fallbackLineText === fallbackRowText);
+    return candidates.some((candidate) => {
+      const normalizedCandidate = normalizeChoice(candidate);
+      return Boolean(normalizedCandidate) && normalizedDescription.indexOf(normalizedCandidate) >= 0;
+    });
   }
 
   function mergeVendorBillLineDescriptions(descriptions, fallback) {
@@ -1100,21 +1428,34 @@ define(
   }
 
   function setVendorBillLineCostCategory(bill, row) {
-    if (!row.costCategory && !row.costCategoryText) return false;
-    const done = setCurrentSublistFieldByValueOrText(
-      bill,
-      'item',
-      'landedcostcategory',
-      [row.costCategory],
-      [row.costCategoryText]
-    );
-    if (!done) {
+    // row.costCategory has already been rehydrated from the mapping record, so a stale hidden
+    // Cost Category on the child row can never reach the Bill line. The mapping record name is
+    // kept as a last text fallback for accounts that label the category the same way.
+    const values = [row.costCategory];
+    const texts = [row.costCategoryText, row.costItemMapText];
+    if (!values.some(Boolean) && !texts.some(Boolean)) return false;
+
+    setCurrentSublistFieldByValueOrText(bill, 'item', 'landedcostcategory', values, texts);
+
+    // Read back instead of trusting the setter: some forms accept the write and then drop it
+    // when the category is not a Landed Cost category or the item cannot carry one.
+    const applied = Boolean(normalizeValue(getCurrentSublistValueSafe(bill, 'item', 'landedcostcategory')).trim());
+    if (!applied) {
       log.audit({
         title: 'LCM landed cost category not applied',
         details: `Landed Cost row ${row.id}: item line does not expose landedcostcategory, or category ${row.costCategoryText || row.costCategory} is not a Landed Cost type category. Item ${row.billItem} must be a non-inventory/service/other-charge item.`,
       });
     }
-    return done;
+    return applied;
+  }
+
+  function getCurrentSublistValueSafe(rec, sublistId, fieldId) {
+    try {
+      const value = rec.getCurrentSublistValue({ sublistId, fieldId });
+      return value === null || value === undefined ? '' : value;
+    } catch (error) {
+      return '';
+    }
   }
 
   function setCurrentSublistFieldByValueOrText(rec, sublistId, fieldId, values, texts) {
@@ -1682,6 +2023,7 @@ define(
     STATUS,
     buildPreview,
     buildAllocationPreview,
+    buildVendorBillRepairPreview,
     createTransactions,
     fetchLandedCostRows,
     getAllocationMethodDefault,
@@ -1693,5 +2035,6 @@ define(
     listCostCategoryItemMatches,
     normalizeMode,
     recalculateAllocatedCosts,
+    repairCreatedVendorBillLines,
   };
 });

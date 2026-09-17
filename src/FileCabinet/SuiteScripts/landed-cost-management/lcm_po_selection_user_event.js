@@ -99,6 +99,13 @@ define(
         label: 'Recalculate Landed Cost',
         functionName: 'openLcmAllocationRecalculation()',
       });
+      // Explicit, one-off correction for Vendor Bills generated before source rows were
+      // merged. No automatic flow rewrites an already-created Bill.
+      context.form.addButton({
+        id: 'custpage_lcm_repair_bill_lines',
+        label: 'Repair Vendor Bill Lines',
+        functionName: 'openLcmVendorBillRepair()',
+      });
     }
   }
 

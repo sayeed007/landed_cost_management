@@ -25,9 +25,13 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         renderCostCategoryItemMatches(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'allocationPreview') {
         renderAllocationPreview(context);
+      } else if (context.request.method === 'GET' && context.request.parameters.action === 'billRepairPreview') {
+        renderBillRepairPreview(context);
       } else if (context.request.method === 'POST') {
         if (context.request.parameters.custpage_action === 'recalculateAllocation') {
           renderAllocationResult(context);
+        } else if (context.request.parameters.custpage_action === 'repairVendorBills') {
+          renderBillRepairResult(context);
         } else {
           renderResult(context);
         }
@@ -147,6 +151,95 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
     const form = serverWidget.createForm({ title: 'LCM Landed Cost Recalculated' });
     addHtml(form, renderResultHtml(result, parentRecordUrl(parentId)));
     context.response.writePage(form);
+  }
+
+  function renderBillRepairPreview(context) {
+    const parentId = context.request.parameters.parentId || '';
+    const preview = accounting.buildVendorBillRepairPreview(parentId);
+    const form = serverWidget.createForm({ title: 'LCM Repair Vendor Bill Lines' });
+
+    addHidden(form, 'custpage_parent_id', parentId);
+    addHidden(form, 'custpage_action', 'repairVendorBills');
+    addHtml(form, renderBillRepairPreviewHtml(preview));
+    if (preview.ok) {
+      form.addSubmitButton({ label: 'Confirm Repair Vendor Bill Lines' });
+    }
+
+    context.response.writePage(form);
+  }
+
+  function renderBillRepairResult(context) {
+    const parentId = context.request.parameters.custpage_parent_id || '';
+    const result = accounting.repairCreatedVendorBillLines(parentId);
+    const form = serverWidget.createForm({ title: 'LCM Vendor Bill Lines Repaired' });
+    addHtml(form, renderBillRepairResultHtml(result, parentRecordUrl(parentId)));
+    context.response.writePage(form);
+  }
+
+  function renderBillRepairPreviewHtml(preview) {
+    return `
+      ${sharedStyles()}
+      <div class="lcm-box">
+        <h3>Preview Vendor Bill Line Repair</h3>
+        <p>Created Vendor Bills: ${preview.bills.length}. Bills needing repair: ${
+          preview.bills.filter((plan) => plan.needsRepair).length
+        }.</p>
+        ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
+        ${renderBillRepairPlans(preview.bills)}
+        <p class="lcm-muted">This action only consolidates duplicate generated cost lines that belong to this LCM record, and re-tags a generated line whose Cost Category is missing. It keeps each Vendor Bill total unchanged, does not add or remove amounts, does not touch any other line, and does not change the Landed Cost rows or their allocation.</p>
+        <p class="lcm-muted">Close this window without confirming if the preview is not correct.</p>
+      </div>
+    `;
+  }
+
+  function renderBillRepairPlans(bills) {
+    if (!bills.length) return '';
+    const rows = bills
+      .map(
+        (plan) => `<tr>
+          <td>${escapeHtml(plan.transactionNumber)}</td>
+          <td>${escapeHtml(plan.vendorText)}</td>
+          <td>${escapeHtml(plan.currencyText)}</td>
+          <td>${plan.sourceRowCount}</td>
+          <td>${plan.targetLineCount}</td>
+          <td>${plan.duplicateLineCount}</td>
+          <td>${plan.untaggedLineCount}</td>
+          <td>${plan.needsRepair ? 'Consolidate duplicate cost lines' : 'Already consolidated'}</td>
+        </tr>`
+      )
+      .join('');
+    const warnings = bills
+      .reduce((all, plan) => all.concat(plan.amountWarnings.map((text) => `${plan.transactionNumber}: ${text}`)), [])
+      .map((text) => `<li>${escapeHtml(text)}</li>`)
+      .join('');
+    return `<table class="lcm-table"><thead><tr><th>Bill</th><th>Vendor</th><th>Currency</th><th>LCM Rows</th><th>Target Lines</th><th>Duplicate Lines</th><th>Untagged Lines</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
+      warnings ? `<h4>Amount notes</h4><ul>${warnings}</ul>` : ''
+    }`;
+  }
+
+  function renderBillRepairResultHtml(result, backUrl) {
+    const rows = result.created
+      .map(
+        (tran) => `<tr>
+          <td>${escapeHtml(tran.label)}</td>
+          <td>${escapeHtml(tran.action || 'Repaired')}</td>
+          <td>${escapeHtml(tran.id)}</td>
+          <td>${escapeHtml(tran.tranid || tran.id)}</td>
+        </tr>`
+      )
+      .join('');
+    const transactionTable = rows
+      ? `<table class="lcm-table"><thead><tr><th>Type</th><th>Action</th><th>Internal ID</th><th>Number</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '';
+    return `
+      ${sharedStyles()}
+      <div class="lcm-box">
+        <h3>Vendor Bill line repair complete</h3>
+        <p>Vendor Bills repaired: ${result.created.length}. Duplicate lines removed: ${result.removedLineCount}. Vendor Bill totals and Landed Cost rows are unchanged.</p>
+        ${transactionTable}
+        ${backUrl ? `<p><a href="${escapeHtml(backUrl)}">Back to Landed Cost Management</a></p>` : ''}
+      </div>
+    `;
   }
 
   function renderError(context, error) {

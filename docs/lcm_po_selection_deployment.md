@@ -183,11 +183,23 @@ On Landed Cost row LC Cost Category change:
 On Create Bill:
 
 - Group Vendor Bills by landed-cost Vendor Name, Subsidiary, and Currency. Exchange Rate does not split a same-vendor/same-currency Bill; the first Bill header rate is retained while each source row's rate remains authoritative for base-currency allocation.
-- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values. Matching uses the mapped/displayed category and item identity so NetSuite-sourced hidden IDs do not create duplicate lines. When appending to an existing generated Vendor Bill, matching existing cost lines are consolidated before the new amount is added. Recalculate Landed Cost remains an allocation repair action and does not rewrite an already-created Vendor Bill.
+- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values.
+- Build the merge identity from internal IDs first, falling back to normalized display text only for a value that has no internal ID. Rehydrate the hidden native Cost Category and LC Cost Item from the selected mapping record before validating the row and before building the key, so stale or blank hidden values cannot split equivalent lines. Never decide a merge on display text alone.
+- When appending to an existing generated Vendor Bill, match existing cost lines by the same ID-first identity - item strictly, then category - consolidate them into one line, and re-stamp the Cost Category after writing rate and amount.
+- Do not merge different LC Cost Categories, different LC Cost Items, or different Allocation Methods.
+- `Recalculate Landed Cost` remains an allocation repair action and does not rewrite an already-created Vendor Bill. `Repair Vendor Bill Lines` is the only path that edits one, and only on explicit confirmation.
 - Use one merged item line with quantity `1`, summed amount as rate/amount, mapped LC Cost Item, shared LC Cost Category, and distinct row memos joined as the description.
 - Keep all original Landed Cost rows separate on the LCM record and mark each source row `Created` with the same generated Bill reference.
 - Mark `Cost Allocated In GRN` only after item-level allocation succeeds.
 - After confirmation, show a `Back to Landed Cost Management` link to return to the source LCM record.
+
+On Repair Vendor Bill Lines:
+
+- Explicit, opt-in, preview-then-confirm. No automatic flow rewrites an already-created Vendor Bill.
+- Consolidate duplicate generated cost lines belonging to this LCM record into one line per merge identity, with quantity `1` and the distinct descriptions merged.
+- Re-tag a generated cost line whose `Landed Cost Category` is missing.
+- Keep every Vendor Bill total unchanged: the surviving line carries the sum of the lines it replaces, not the Landed Cost row total. Report any difference between the two as a note in the preview instead of writing it.
+- Do not touch lines that are not generated cost lines for this LCM record, do not change Landed Cost rows, and do not re-run allocation.
 
 On Recalculate Landed Cost:
 
