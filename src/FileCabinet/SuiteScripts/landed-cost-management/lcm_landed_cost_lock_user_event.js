@@ -17,22 +17,16 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     if (!context.form) return;
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
     renameBodyFields(context.form, [
-      { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
       { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
       { fieldId: FIELDS.lcmLandedCosts.targetType, label: 'Document Type' },
       { fieldId: FIELDS.lcmLandedCosts.costItemMap, label: 'LC Cost Category' },
     ]);
     hideBodyFields(context.form, [
-      FIELDS.lcmLandedCosts.legacyCostVendorName,
       FIELDS.lcmLandedCosts.billLineType,
       FIELDS.lcmLandedCosts.billType,
       FIELDS.lcmLandedCosts.subsidiary,
-      FIELDS.lcmLandedCosts.costProfile,
       FIELDS.lcmLandedCosts.costCategory,
-      FIELDS.lcmLandedCosts.expenseAccount,
       FIELDS.lcmLandedCosts.billItem,
-      FIELDS.lcmLandedCosts.debitAccount,
-      FIELDS.lcmLandedCosts.creditAccount,
       FIELDS.lcmLandedCosts.department,
       FIELDS.lcmLandedCosts.class,
     ]);
@@ -169,7 +163,6 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       details:
         `Form: ${getFormIdentity(context)}. ` +
         `Configured LC Cost Category mapping: ${FIELDS.lcmLandedCosts.costItemMap}. ` +
-        `Legacy LC Cost Category: ${FIELDS.lcmLandedCosts.costProfile}. ` +
         `Configured LC Cost Item: ${FIELDS.lcmLandedCosts.billItem}. ` +
         `ON FORM -> ${onForm.join(' | ') || 'none'}. ` +
         `NOT ON FORM -> ${notOnForm.join(', ') || 'none'}`,
@@ -201,8 +194,8 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     if (!wasCreated) {
       if (context.type === context.UserEventType.XEDIT) {
         // An inline edit submits only the touched fields, so the full vendor/parent sourcing has
-        // nothing to read. The cost profile refs are self-contained and safe to derive here.
-        sourceCostProfileRefs(context.newRecord);
+        // nothing to read. The mapping refs are self-contained and safe to derive here.
+        sourceCostCategoryRefs(context.newRecord);
       } else {
         sourceVendorDefaults(context.newRecord);
       }
@@ -233,7 +226,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     setDefaultTextIfBlank(rec, f.targetType, config.DEFAULTS.targetTypeText);
     setDefaultIfBlank(rec, f.effectiveDate, new Date());
     setDefaultIfBlank(rec, f.location, parentDefaults.location, parentDefaults.locationText);
-    sourceCostProfileRefs(rec);
+    sourceCostCategoryRefs(rec);
     sourceAllocationMethodDefault(rec);
     setTextIfPresent(rec, f.billLineType, config.DEFAULTS.billLineTypeText);
     setTextIfPresent(rec, f.billType, config.DEFAULTS.billTypeText);
@@ -252,7 +245,6 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       ? accounting.getVendorCurrencyDefaults(vendorId, currencyId, rec.getValue({ fieldId: f.subsidiary }) || defaults.subsidiary)
       : defaults;
     setDefaultIfBlank(rec, f.exchangeRate, currencyDefaults.exchangeRate || defaults.exchangeRate);
-    setDefaultIfBlank(rec, f.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
   }
 
   function getParentDefaults(rec) {
@@ -282,39 +274,31 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
   // Server-side sourcing is the guaranteed path: it runs no matter which form was used, whether
   // the fields are hidden, and whether the client script loaded at all. The client script only
   // mirrors this so the user sees the value before saving.
-  function sourceCostProfileRefs(rec) {
+  function sourceCostCategoryRefs(rec) {
     const f = FIELDS.lcmLandedCosts;
-    const selectedCategory = getSelectedCostCategory(rec);
-    const selectedId = selectedCategory.value;
-    const selectedText = selectedCategory.text;
+    const selectedId = getValueIfPresent(rec, f.costItemMap);
+    const selectedText = getTextIfPresent(rec, f.costItemMap);
 
-    if (!selectedId && !selectedText) {
+    if (!selectedId) {
       log.audit({
         title: 'LCM LC Cost Category sourcing skipped',
-        details: `No value on ${getCostProfileSourceFieldIds().join(' or ')}. Nothing to resolve an LC Cost Item from.`,
+        details: `No value on ${getCostCategorySourceFieldIds().join(' or ')}. Nothing to resolve an LC Cost Item from.`,
       });
       return;
     }
 
-    const defaults =
-      selectedCategory.fieldId === f.costItemMap
-        ? accounting.getCostItemMapDefaults(selectedId)
-        : accounting.getCostProfileDefaults(selectedId, selectedText);
+    const defaults = accounting.getCostItemMapDefaults(selectedId);
     if (!defaults.costCategory && !defaults.costCategoryText) return;
 
-    const mapSet =
-      selectedCategory.fieldId === f.costItemMap ||
-      setValueOrText(rec, f.costItemMap, defaults.costItemMap, defaults.costItemMapText);
-    const categorySet =
-      selectedCategory.fieldId === f.costCategory ||
-      setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
+    const mapSet = setValueOrText(rec, f.costItemMap, defaults.costItemMap, defaults.costItemMapText);
+    const categorySet = setValueOrText(rec, f.costCategory, defaults.costCategory, defaults.costCategoryText);
     const itemSet = setValueOrText(rec, f.billItem, defaults.billItem, defaults.billItemText);
 
     if (!itemSet) {
       log.error({
         title: 'LCM LC Cost Item was not written to the record',
         details:
-          `Source field: ${selectedCategory.fieldId || '(none)'}. ` +
+          `Source field: ${f.costItemMap}. ` +
           `Selected internal id: ${selectedId || '(none)'}. Selected text: "${selectedText ||
             defaults.costItemMapText ||
             defaults.costCategoryText}". Attempted item name: "${defaults.attemptedItemName || ''}". ` +
@@ -331,7 +315,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
 
     log.audit({
       title: 'LCM LC Cost Item sourced',
-      details: `${selectedCategory.fieldId}=${selectedId} ("${defaults.costItemMapText || defaults.costCategoryText}") -> ${f.billItem}=${
+      details: `${f.costItemMap}=${selectedId} ("${defaults.costItemMapText || defaults.costCategoryText}") -> ${f.billItem}=${
         defaults.billItem
       } ("${defaults.billItemText}"). Source: ${defaults.source || '(none)'}. Mapping record: ${
         defaults.mappingRecordId || '(none)'
@@ -343,7 +327,7 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     const f = FIELDS.lcmLandedCosts;
     if (rec.getValue({ fieldId: f.allocationMethod })) return;
 
-    let costCategoryId = getValueIfPresent(rec, f.costCategory) || getValueIfPresent(rec, f.costProfile);
+    let costCategoryId = getValueIfPresent(rec, f.costCategory);
     if (!costCategoryId) {
       const costItemMapId = getValueIfPresent(rec, f.costItemMap);
       costCategoryId = costItemMapId ? accounting.getCostItemMapDefaults(costItemMapId).costCategory : '';
@@ -377,17 +361,13 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
       f.vendor,
       f.subsidiary,
       f.costItemMap,
-      f.costProfile,
       f.costCategory,
       f.amount,
       f.currency,
       f.exchangeRate,
       f.effectiveDate,
       f.allocationMethod,
-      f.expenseAccount,
       f.billItem,
-      f.debitAccount,
-      f.creditAccount,
       f.location,
       f.memo,
     ];
@@ -446,20 +426,9 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     }
   }
 
-  function getCostProfileSourceFieldIds() {
+  function getCostCategorySourceFieldIds() {
     const f = FIELDS.lcmLandedCosts;
-    return [f.costItemMap, f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
-  }
-
-  function getSelectedCostCategory(rec) {
-    const fieldIds = getCostProfileSourceFieldIds();
-    for (let index = 0; index < fieldIds.length; index += 1) {
-      const fieldId = fieldIds[index];
-      const value = getValueIfPresent(rec, fieldId);
-      const text = getTextIfPresent(rec, fieldId);
-      if (value || text) return { fieldId, value, text };
-    }
-    return { fieldId: '', value: '', text: '' };
+    return [f.costItemMap].filter(Boolean);
   }
 
   function getValueIfPresent(rec, fieldId) {

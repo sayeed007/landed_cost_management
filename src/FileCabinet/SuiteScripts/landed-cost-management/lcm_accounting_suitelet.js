@@ -21,8 +21,6 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         renderAllocationMethodDefault(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'costItemMapDefaults') {
         renderCostItemMapDefaults(context);
-      } else if (context.request.method === 'GET' && context.request.parameters.action === 'costProfileDefaults') {
-        renderCostProfileDefaults(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'costCategoryItemMatches') {
         renderCostCategoryItemMatches(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'allocationPreview') {
@@ -90,19 +88,6 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
     const payload = {
       ok: Boolean(costItemMapId),
       defaults: costItemMapId ? accounting.getCostItemMapDefaults(costItemMapId) : {},
-    };
-    context.response.write(JSON.stringify(payload));
-  }
-
-  function renderCostProfileDefaults(context) {
-    const costCategoryId = context.request.parameters.costCategoryId || '';
-    const costCategoryText = context.request.parameters.costCategoryText || '';
-    const payload = {
-      ok: Boolean(costCategoryId || costCategoryText),
-      defaults:
-        costCategoryId || costCategoryText
-          ? accounting.getCostProfileDefaults(costCategoryId, costCategoryText)
-          : {},
     };
     context.response.write(JSON.stringify(payload));
   }

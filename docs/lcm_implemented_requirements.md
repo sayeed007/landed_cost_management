@@ -135,7 +135,7 @@ Open caveat:
 - Account-specific Vendor Bill body field `Bill Type` is mapped as `custbody12`; LCM scripts always apply `LC Bill` when Vendor Bills are generated.
 - Landed Cost rows require their own visible `Vendor Name`. Subsidiary, currency, and exchange rate default from that row vendor when possible.
 - Users select `LC Cost Category` from active `LCM Cost Category Item Map` rows. Scripts derive the hidden native Cost Category and Bill Item references from that selected mapping.
-- The client and child User Event source matching available defaults: Subsidiary, Document Type, Currency, Exchange Rate, Effective Date, PO-derived Location, fixed hidden Bill Type, fixed hidden Bill Line Type, Expense Account compatibility data, Allocation Method, Cost Category, and Bill Item. Each field is applied independently so one unavailable/invalid account field does not block the remaining defaults.
+- The client and child User Event source matching available defaults: Subsidiary, Document Type, Currency, Exchange Rate, Effective Date, PO-derived Location, fixed hidden Bill Type, fixed hidden Bill Line Type, Allocation Method, mapped Cost Category, and LC Cost Item. Expense Account is retired because Vendor Bills always use item lines; Journal account fallback remains script-configured. Each field is applied independently so one unavailable or invalid default does not block the remaining defaults.
 
 ## 9. Bill and Journal Creation
 
@@ -196,7 +196,7 @@ Selecting `LC Cost Category` (`custrecord_lcm_lcm_cost_item_map`, `customrecord_
 - Active mapping rows are the user-facing options. Inactivating a mapping row removes that option from the Landed Cost sublist.
 - `customscript_lcm_cost_item_map_ue` blocks duplicate active mappings for the same native category and names the mapping record from the selected native category for clean dropdown display.
 - The previous exact-name item fallback is no longer part of the user-facing flow. Categories must be configured in `LCM Cost Category Item Map` before users can select them on Landed Cost rows.
-- `normalizeValue` was called six times in `lcm_accounting_lib.js` without ever being defined, so every `getCostProfileDefaults` call raised `ReferenceError` at runtime. It is now defined.
+- The mapping-only path uses the existing `normalizeValue` helper in `lcm_accounting_lib.js`; no legacy category fallback or exact-name item lookup remains.
 
 ### Where sourcing runs
 
@@ -205,9 +205,9 @@ Selecting `LC Cost Category` (`custrecord_lcm_lcm_cost_item_map`, `customrecord_
 | Immediate | `lcm_po_selection_client.js` `fieldChanged`/`pageInit` | User changes mapped LC Cost Category on the form | Best effort. Depends on the client script loading and the field ids matching the rendered form. |
 | Fallback | `lcm_landed_cost_lock_user_event.js` `beforeSubmit` | Create, edit, **and inline edit (XEDIT)** | Guaranteed. Runs regardless of form, field visibility, or whether the client script loaded. |
 
-Inline edit was previously skipped entirely, so rows saved through inline edit or CSV import never received the hidden references. `XEDIT` now runs `sourceCostProfileRefs` only; the full vendor/parent sourcing stays off that path because an inline edit submits only the touched fields.
+Inline edit was previously skipped entirely, so rows saved through inline edit or CSV import never received the hidden references. `XEDIT` now runs mapping-reference sourcing only; the full vendor/parent sourcing stays off that path because an inline edit submits only the touched fields.
 
-The client resolves the mapping through the `costItemMapDefaults` Suitelet action rather than its own `N/search`, so the immediate path and the save-time fallback cannot disagree. Old rows that still carry only the hidden native category can use `costProfileDefaults` to find the active mapping by category.
+The client and child User Event resolve the mapping through the `costItemMapDefaults` Suitelet/library path rather than a legacy category fallback, so the immediate path and the save-time fallback cannot disagree. The hidden native `Cost Category` and `LC Cost Item` are always derived from the selected mapping record.
 
 ### Diagnostics
 

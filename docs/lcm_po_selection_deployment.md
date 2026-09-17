@@ -167,7 +167,7 @@ On header Purchase Order Vendor/PO change:
 
 On Landed Cost row Vendor Name change:
 
-- Source subsidiary, currency, exchange rate, fixed hidden Bill Type, fixed hidden Bill Line Type, and expense-account compatibility defaults from the selected row vendor where available.
+- Source subsidiary, currency, exchange rate, fixed hidden Bill Type, and fixed hidden Bill Line Type from the selected row vendor where available.
 - Rename Target Type to Document Type and default it to Bill.
 - Keep Currency and Exchange Rate editable after defaulting; refresh Exchange Rate when Currency changes.
 - Make Effective Date mandatory and default it to today's date.

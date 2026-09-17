@@ -13,8 +13,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     journal: 'journal',
   };
   const vendorDefaultsCache = {};
-  const costProfileDefaultsCache = {};
-  const costItemMapCache = {};
+  const costItemMapDefaultsCache = {};
   const journalAccountCandidatesCache = {};
 
   function toNumber(value) {
@@ -233,17 +232,13 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       f.vendor,
       f.subsidiary,
       f.costItemMap,
-      f.costProfile,
       f.costCategory,
       f.amount,
       f.currency,
       f.exchangeRate,
       f.effectiveDate,
       f.allocationMethod,
-      f.expenseAccount,
       f.billItem,
-      f.debitAccount,
-      f.creditAccount,
       f.department,
       f.class,
       f.location,
@@ -288,8 +283,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           subsidiaryText: getText(result, f.subsidiary),
           costItemMap: getValue(result, f.costItemMap),
           costItemMapText: getText(result, f.costItemMap),
-          costProfile: getValue(result, f.costProfile),
-          costProfileText: getText(result, f.costProfile),
           costCategory: getValue(result, f.costCategory),
           costCategoryText: getText(result, f.costCategory),
           amount: toNumber(getValue(result, f.amount)),
@@ -299,12 +292,8 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
           effectiveDate: getValue(result, f.effectiveDate),
           allocationMethod: getValue(result, f.allocationMethod),
           allocationMethodText: getText(result, f.allocationMethod),
-          expenseAccount: getValue(result, f.expenseAccount),
-          expenseAccountText: getText(result, f.expenseAccount),
           billItem: getValue(result, f.billItem),
           billItemText: getText(result, f.billItem),
-          debitAccount: getValue(result, f.debitAccount),
-          creditAccount: getValue(result, f.creditAccount),
           department: getValue(result, f.department),
           class: getValue(result, f.class),
           location: getValue(result, f.location),
@@ -352,7 +341,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     }
     row.billLineTypeText = row.billLineTypeText || DEFAULTS.billLineTypeText;
     row.billTypeText = DEFAULTS.billTypeText;
-    applyCostProfileDefaults(row);
+    applyCostItemMapDefaults(row);
     return enrichRowFromVendor(row);
   }
 
@@ -364,9 +353,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       row.subsidiary = defaults.subsidiary;
       row.subsidiaryText = defaults.subsidiaryText || row.subsidiaryText;
     }
-    if (!row.expenseAccount && defaults.expenseAccount) {
-      row.expenseAccount = defaults.expenseAccount;
-    }
     if (!row.currency && defaults.currency) {
       row.currency = defaults.currency;
       row.currencyText = defaults.currencyText || row.currencyText;
@@ -375,19 +361,11 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     return row;
   }
 
-  function applyCostProfileDefaults(row) {
-    const defaults = row.costItemMap
-      ? getCostItemMapDefaults(row.costItemMap)
-      : getCostProfileDefaults(
-          row.costProfile || row.costCategory,
-          row.costProfileText || row.costCategoryText
-        );
+  function applyCostItemMapDefaults(row) {
+    if (!row.costItemMap) return row;
+    const defaults = getCostItemMapDefaults(row.costItemMap);
     if (!defaults.costCategory && !defaults.costCategoryText) return row;
 
-    if (!row.costItemMap) {
-      row.costItemMap = defaults.costItemMap || row.costItemMap;
-      row.costItemMapText = defaults.costItemMapText || row.costItemMapText;
-    }
     if (!row.costCategory) {
       row.costCategory = defaults.costCategory || row.costCategory;
       row.costCategoryText = defaults.costCategoryText || row.costCategoryText;
@@ -402,7 +380,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   function getCostItemMapDefaults(costItemMapId) {
     const mapId = normalizeValue(costItemMapId);
     const cacheKey = `map|${mapId}`;
-    if (costProfileDefaultsCache[cacheKey]) return costProfileDefaultsCache[cacheKey];
+    if (costItemMapDefaultsCache[cacheKey]) return costItemMapDefaultsCache[cacheKey];
 
     const map = lookupCostItemMapById(mapId);
     const activeItem = findActiveItemByInternalId(map.billItem, map.billItemText);
@@ -430,43 +408,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
         `Reason: ${defaults.reason || '(none)'}`,
     });
 
-    costProfileDefaultsCache[cacheKey] = defaults;
-    return defaults;
-  }
-
-  function getCostProfileDefaults(costCategoryId, costCategoryText) {
-    const categoryId = normalizeValue(costCategoryId);
-    const categoryText = normalizeValue(costCategoryText) || lookupCostCategoryName(categoryId);
-    const cacheKey = `${categoryId}|${categoryText}`;
-    if (costProfileDefaultsCache[cacheKey]) return costProfileDefaultsCache[cacheKey];
-
-    const mappedItem = findMappedCostItem(categoryId);
-    const defaults = {
-      costItemMap: mappedItem.mappingRecordId || '',
-      costItemMapText: mappedItem.mappingRecordText || '',
-      costCategory: categoryId,
-      costCategoryText: categoryText,
-      billItem: mappedItem.id,
-      billItemText: mappedItem.text,
-      attemptedItemName: '',
-      matched: Boolean(mappedItem.id),
-      reason: mappedItem.reason,
-      source: mappedItem.id ? 'category mapping' : 'none',
-      mappingRecordId: mappedItem.mappingRecordId || '',
-    };
-
-    log[defaults.matched ? 'audit' : 'error']({
-      title: `LCM LC Cost Category ${defaults.matched ? 'resolved' : 'did NOT resolve'} an LC Cost Item`,
-      details:
-        `Cost Profile internal id: ${categoryId || '(none)'}. ` +
-        `Cost Profile text: "${categoryText || '(none)'}". ` +
-        `Result: ${
-          defaults.matched ? `item ${defaults.billItem} ("${defaults.billItemText}")` : 'no item set'
-        }. Source: ${defaults.source}. Mapping record: ${defaults.mappingRecordId || '(none)'}. ` +
-        `Reason: ${defaults.reason || '(none)'}`,
-    });
-
-    costProfileDefaultsCache[cacheKey] = defaults;
+    costItemMapDefaultsCache[cacheKey] = defaults;
     return defaults;
   }
 
@@ -516,82 +458,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     }
   }
 
-  function lookupCostCategoryName(costCategoryId) {
-    if (!costCategoryId) return '';
-    const attempts = [
-      { type: 'costcategory', columns: ['name'] },
-      { type: 'landedcostcategory', columns: ['name'] },
-    ];
-
-    for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
-      const attempt = attempts[attemptIndex];
-      try {
-        const values = search.lookupFields({
-          type: attempt.type,
-          id: costCategoryId,
-          columns: attempt.columns,
-        });
-        const name = extractLookupText(values.name) || extractLookupValue(values.name);
-        if (name) return name;
-      } catch (error) {
-        // Account-specific category records can expose different search type names.
-      }
-    }
-    return '';
-  }
-
-  function findMappedCostItem(costCategoryId) {
-    const categoryId = normalizeValue(costCategoryId);
-    if (!categoryId) return { id: '', text: '', reason: 'No LC Cost Category internal ID was available for mapping lookup.' };
-    if (costItemMapCache[categoryId]) return costItemMapCache[categoryId];
-
-    const f = FIELDS.lcmCostItemMap;
-    try {
-      const results = search
-        .create({
-          type: RECORDS.lcmCostItemMap,
-          filters: [['isinactive', 'is', 'F'], 'AND', [f.costCategory, 'anyof', categoryId]],
-          columns: ['internalid', 'name', f.costCategory, f.costItem],
-        })
-        .run()
-        .getRange({ start: 0, end: 2 });
-
-      if (!results || !results.length) {
-        costItemMapCache[categoryId] = {
-          id: '',
-          text: '',
-          reason: `No active LCM Cost Category Item Map record exists for category ${categoryId}.`,
-        };
-        return costItemMapCache[categoryId];
-      }
-
-      const result = results[0];
-      const mappingRecordId = normalizeValue(result.getValue({ name: 'internalid' }));
-      const mappingRecordText = normalizeValue(result.getValue({ name: 'name' })) || normalizeValue(result.getText({ name: f.costCategory }));
-      const mappedItemId = normalizeValue(result.getValue({ name: f.costItem }));
-      const mappedItemText = normalizeValue(result.getText({ name: f.costItem }));
-      const activeItem = findActiveItemByInternalId(mappedItemId, mappedItemText);
-      costItemMapCache[categoryId] = {
-        id: activeItem.id,
-        text: activeItem.text,
-        mappingRecordId,
-        mappingRecordText,
-        reason:
-          activeItem.reason ||
-          (results.length > 1
-            ? `Matched mapping record ${mappingRecordId}; more than one active map exists for this category. Took the first.`
-            : `Matched mapping record ${mappingRecordId}.`),
-      };
-      return costItemMapCache[categoryId];
-    } catch (error) {
-      costItemMapCache[categoryId] = {
-        id: '',
-        text: '',
-        reason: `LCM Cost Category Item Map lookup failed: ${error.message || error}`,
-      };
-      return costItemMapCache[categoryId];
-    }
-  }
 
   function findActiveItemByInternalId(itemId, itemText) {
     const id = normalizeValue(itemId);
@@ -701,7 +567,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (vendorDefaultsCache[vendorId]) return vendorDefaultsCache[vendorId];
 
     const subsidiary = lookupVendorField(vendorId, 'subsidiary');
-    const expenseAccount = lookupVendorField(vendorId, 'expenseaccount');
     const currency = lookupFirstVendorField(vendorId, ['currency', 'defaultcurrency']);
 
     vendorDefaultsCache[vendorId] = {
@@ -709,8 +574,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       subsidiaryText: subsidiary.text,
       currency: currency.value,
       currencyText: currency.text,
-      expenseAccount: expenseAccount.value,
-      expenseAccountText: expenseAccount.text,
     };
     return vendorDefaultsCache[vendorId];
   }
@@ -731,8 +594,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
         exchangeRate: getRecordValue(bill, 'exchangerate'),
         billType: getRecordValue(bill, TRANSACTION_FIELDS.vendorBill.billType),
         billTypeText: getRecordText(bill, TRANSACTION_FIELDS.vendorBill.billType),
-        expenseAccount: defaults.expenseAccount,
-        expenseAccountText: defaults.expenseAccountText,
       };
       return billDefaults;
     } catch (error) {
@@ -936,11 +797,11 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     if (!row.subsidiary) errors.push('Subsidiary is required');
     if (mode === MODES.bill) {
       if (!row.vendor) errors.push('Vendor is required for Vendor Bill');
-      if (!row.costItemMap && !row.costProfile && !row.costProfileText) errors.push('LC Cost Category is required');
+      if (!row.costItemMap) errors.push('LC Cost Category is required');
       if (!row.costCategory && !row.costCategoryText) {
         errors.push('Cost Category is required for landed-cost bill lines');
       }
-      if (!row.billItem && !row.billItemText) errors.push('Bill Item is required for item bill lines');
+      if (!row.billItem && !row.billItemText) errors.push('LC Cost Item is required for item bill lines');
     } else {
       const debitAccount = getJournalDebitAccount(row);
       const creditAccount = getJournalCreditAccount(row);
@@ -1540,10 +1401,9 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   function getJournalAccountCandidates(row, side) {
     const configured =
       side === 'debit' ? ACCOUNT_CONSTANTS.journalDebitAccount : ACCOUNT_CONSTANTS.journalCreditAccount;
-    const rowAccount = side === 'debit' ? row.debitAccount : row.creditAccount;
     const autoAccounts = getAutoJournalAccountCandidates(row.subsidiary);
     const orderedAutoAccounts = side === 'credit' ? autoAccounts.slice(1).concat(autoAccounts.slice(0, 1)) : autoAccounts;
-    return uniqueIds([configured, rowAccount].concat(orderedAutoAccounts));
+    return uniqueIds([configured].concat(orderedAutoAccounts));
   }
 
   function getAutoJournalAccountCandidates(subsidiaryId) {
@@ -1797,7 +1657,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     fetchLandedCostRows,
     getAllocationMethodDefault,
     getCostItemMapDefaults,
-    getCostProfileDefaults,
     getSelectedPurchaseOrderDefaults,
     getVendorBillDefaults,
     getVendorCurrencyDefaults,

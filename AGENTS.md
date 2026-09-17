@@ -41,7 +41,7 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - Landed Cost `Bill Line Type` is always `Item` and should be hidden.
 - Landed Cost `Bill Type` is always `LC Bill` and should be hidden.
 - The user-facing Landed Cost `LC Cost Category` field is `custrecord_lcm_lcm_cost_item_map`, a selector to active `customrecord_lcm_cost_item_map` records.
-- Legacy/native Landed Cost category fields (`custrecord_lcm_lcm_cost_profile` and `custrecord_lcm_lcm_cost_category`) are hidden derived/compatibility fields.
+- Hidden native `Cost Category` (`custrecord_lcm_lcm_cost_category`) is derived from the mapping selector and is required for Vendor Bill landed-cost tagging and GRN allocation. The former `Legacy LC Cost Category` field (`custrecord_lcm_lcm_cost_profile`) is retired and must not be reintroduced.
 - `LC Cost Item` sourcing must use the selected `customrecord_lcm_cost_item_map` row. Do not reintroduce exact same-name item matching as a user-facing fallback.
 - Each active `customrecord_lcm_cost_item_map` row maps one native LC Cost Category to one active LC Cost Item; duplicate active mappings for the same category are invalid.
 - Landed Cost `Document Type` defaults to `Bill`.
@@ -51,6 +51,7 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - Landed Cost `Cost Allocated In GRN` is checked only after item-level landed-cost allocation succeeds; created-but-unallocated Bill rows can be repaired through `Recalculate Landed Cost`.
 - `Recalculate Landed Cost` must not create or append Vendor Bills. It recalculates item landed cost fresh from all created Bill-type Landed Cost rows and then marks those rows allocated.
 - `LC Cost Item`, `Department`, and `Class` are not user-facing in the landed-cost sublist.
+- Canonical Landed Cost fields are the current Vendor Name, Bill Type, mapped LC Cost Category, and LC Cost Item fields. The duplicate legacy Vendor Name, Deprecated Bill Type, Expense Account, Bill Item, Debit Account, and Credit Account fields are retired and must not be reintroduced. The hidden native Cost Category remains for Vendor Bill tagging and GRN allocation; the former Legacy LC Cost Category field is retired. Journal accounts are script-configured rather than stored on each Landed Cost row.
 
 ## Verification
 

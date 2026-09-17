@@ -19,10 +19,10 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       exposeWindowCallbacks();
       announceClientLoad(currentRecord.get());
       applyLandedCostLineDefaults(currentRecord.get(), '');
-      syncCostProfileDefaults(currentRecord.get(), '');
+      syncCostCategoryDefaults(currentRecord.get(), '');
     } catch (error) {
       log.error({
-        title: 'LCM cost profile page init sync failed',
+        title: 'LCM cost category page init sync failed',
         details: error.message || error,
       });
     } finally {
@@ -64,20 +64,15 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       `LCM client loaded.\n` +
       `Record type: ${safeRecordType(rec)}\n` +
       `Cost Item Map field: ${FIELDS.lcmLandedCosts.costItemMap} reachable=${reachable.costItemMap}\n` +
-      `Profile field: ${FIELDS.lcmLandedCosts.costProfile} reachable=${reachable.profile}\n` +
       `Cost Category field: ${FIELDS.lcmLandedCosts.costCategory} reachable=${reachable.costCategory}\n` +
       `LC Cost Item field: ${FIELDS.lcmLandedCosts.billItem} reachable=${reachable.item}\n` +
       `Selected source: ${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
         ''}"`;
     traceClient('LCM client script loaded', message);
-    if (!reachable.costItemMap && !reachable.profile && !reachable.costCategory) {
+    if (!reachable.costItemMap) {
       window.alert(
         'LCM client script loaded, but this form has no field "' +
           FIELDS.lcmLandedCosts.costItemMap +
-          '", "' +
-          FIELDS.lcmLandedCosts.costProfile +
-          '" or "' +
-          FIELDS.lcmLandedCosts.costCategory +
           '". LC Cost Item cannot be auto-filled until the field id in lcm_po_selection_config.js ' +
           'matches the form. See the LCM Landed Cost form field inventory entry in the script ' +
           'execution log for the real field ids.'
@@ -88,7 +83,6 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
   function listReachableFields(rec) {
     return {
       costItemMap: fieldExists(rec, FIELDS.lcmLandedCosts.costItemMap),
-      profile: fieldExists(rec, FIELDS.lcmLandedCosts.costProfile),
       costCategory: fieldExists(rec, FIELDS.lcmLandedCosts.costCategory),
       item: fieldExists(rec, FIELDS.lcmLandedCosts.billItem),
     };
@@ -149,8 +143,8 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       return;
     }
 
-    if (isLandedCostField(context, getCostProfileSourceFieldIds())) {
-      syncCostProfileDefaults(currentRecord.get(), context.sublistId);
+    if (isLandedCostField(context, getCostCategorySourceFieldIds())) {
+      syncCostCategoryDefaults(currentRecord.get(), context.sublistId);
       return;
     }
 
@@ -175,7 +169,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       `LCM fieldChanged fired.\n` +
       `fieldId=${context.fieldId || '(none)'}\n` +
       `sublistId=${context.sublistId || '(body)'}\n` +
-      `source candidates=${getCostProfileSourceFieldIds().join(', ')}\n` +
+      `source candidates=${getCostCategorySourceFieldIds().join(', ')}\n` +
       `selected source=${selectedCategory.fieldId || '(none)'} value=${selectedCategory.value || '(blank)'} text="${selectedCategory.text ||
         ''}"`;
     traceClient('LCM fieldChanged trace', message);
@@ -207,18 +201,16 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     }
   }
 
-  function syncCostProfileDefaults(rec, contextSublistId) {
+  function syncCostCategoryDefaults(rec, contextSublistId) {
     const sublistId = getLandedCostSublistId(contextSublistId);
     const selectedCategory = getSelectedCostCategory(rec, sublistId);
     const selectedValue = selectedCategory.value;
     const selectedText = selectedCategory.text;
 
     if (!selectedValue && !selectedText) {
-      // Reaching here on a fieldChanged for the profile field means the field id is wrong for
-      // this form. Staying silent here is what made the original failure invisible.
       log.audit({
         title: 'LCM LC Cost Category sourcing skipped',
-        details: `No value readable from "${getCostProfileSourceFieldIds().join('" or "')}" (sublist "${sublistId ||
+        details: `No value readable from "${getCostCategorySourceFieldIds().join('" or "')}" (sublist "${sublistId ||
           'body'}"). Either nothing is selected, or that field id does not exist on this form.`,
       });
       return;
@@ -235,10 +227,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
           `target item field=${FIELDS.lcmLandedCosts.billItem}\n` +
           `available current sublist fields=${getSublistFieldIds(rec, sublistId).join(', ') || '(none)'}`
       );
-      const defaults =
-        selectedCategory.fieldId === FIELDS.lcmLandedCosts.costItemMap
-          ? fetchCostItemMapDefaults(selectedValue)
-          : fetchCostProfileDefaults(selectedValue, selectedText);
+      const defaults = fetchCostItemMapDefaults(selectedValue);
       traceClient(
         'LCM LC Cost Category lookup returned',
         `costItemMap=${defaults.costItemMap || '(blank)'}\n` +
@@ -253,9 +242,13 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
           `matched=${Boolean(defaults.matched)}\n` +
           `reason=${defaults.reason || '(none)'}`
       );
-      const mapSet =
-        selectedCategory.fieldId === FIELDS.lcmLandedCosts.costItemMap ||
-        applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costItemMap, defaults.costItemMap, defaults.costItemMapText);
+      const mapSet = applyDefault(
+        rec,
+        sublistId,
+        FIELDS.lcmLandedCosts.costItemMap,
+        defaults.costItemMap,
+        defaults.costItemMapText
+      );
       const categorySet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, defaults.costCategory, defaults.costCategoryText);
       const itemSet = applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billItem, defaults.billItem, defaults.billItemText);
       const writtenItem = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.billItem);
@@ -304,12 +297,9 @@ ${defaults.reason || ''}`
       }
     } catch (error) {
       log.error({
-        title: 'LCM cost profile defaults were not sourced',
+        title: 'LCM cost category defaults were not sourced',
         details: error.message || error,
       });
-      if (selectedCategory.fieldId !== FIELDS.lcmLandedCosts.costItemMap) {
-        applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.costCategory, selectedValue, selectedText);
-      }
       window.alert(
         `LC Cost Item could not be looked up: ${error.message || error}
 
@@ -330,7 +320,6 @@ ${defaults.reason || ''}`
       const defaults = fetchVendorBillDefaults(vendorId);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.currency, defaults.currency, defaults.currencyText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.exchangeRate, defaults.exchangeRate);
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.expenseAccount, defaults.expenseAccount, defaults.expenseAccountText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billLineType, '', config.DEFAULTS.billLineTypeText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.billType, '', config.DEFAULTS.billTypeText);
       applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.subsidiary, defaults.subsidiary, defaults.subsidiaryText);
@@ -441,8 +430,7 @@ ${defaults.reason || ''}`
     const sublistId = getLandedCostSublistId(contextSublistId);
     try {
       let costCategoryId =
-        getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costCategory) ||
-        getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costProfile);
+        getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costCategory);
       if (!costCategoryId) {
         const costItemMapId = getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.costItemMap);
         costCategoryId = costItemMapId ? fetchCostItemMapDefaults(costItemMapId).costCategory : '';
@@ -463,13 +451,13 @@ ${defaults.reason || ''}`
     return contextSublistId === SUBLISTS.lcmLandedCosts ? contextSublistId : '';
   }
 
-  function getCostProfileSourceFieldIds() {
+  function getCostCategorySourceFieldIds() {
     const f = FIELDS.lcmLandedCosts;
-    return [f.costItemMap, f.costProfile, f.costCategory].filter((fieldId, index, fieldIds) => fieldId && fieldIds.indexOf(fieldId) === index);
+    return [f.costItemMap].filter(Boolean);
   }
 
   function getSelectedCostCategory(rec, sublistId) {
-    const fieldIds = getCostProfileSourceFieldIds();
+    const fieldIds = getCostCategorySourceFieldIds();
     for (let index = 0; index < fieldIds.length; index += 1) {
       const fieldId = fieldIds[index];
       const value = getLandedCostValue(rec, sublistId, fieldId);
@@ -562,34 +550,6 @@ ${defaults.reason || ''}`
     const response = https.get({ url: suiteletUrl });
     const payload = JSON.parse(response.body || '{}');
     if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Category mapping defaults.');
-    return payload.defaults || {};
-  }
-
-  function fetchCostProfileDefaults(costCategoryId, costCategoryText) {
-    const suiteletUrl = url.resolveScript({
-      scriptId: SCRIPTS.accountingSuitelet.scriptId,
-      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
-      params: {
-        action: 'costProfileDefaults',
-        costCategoryId: costCategoryId || '',
-        costCategoryText: costCategoryText || '',
-      },
-    });
-    traceClient(
-      'LCM calling costProfileDefaults Suitelet',
-      `action=costProfileDefaults\n` +
-        `costCategoryId=${costCategoryId || '(blank)'}\n` +
-        `costCategoryText="${costCategoryText || ''}"\n` +
-        `url=${suiteletUrl}`
-    );
-    const response = https.get({ url: suiteletUrl });
-    traceClient(
-      'LCM costProfileDefaults Suitelet responded',
-      `response code=${response.code || '(none)'}\n` +
-        `response body=${String(response.body || '').slice(0, 900)}`
-    );
-    const payload = JSON.parse(response.body || '{}');
-    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return LC Cost Category defaults.');
     return payload.defaults || {};
   }
 

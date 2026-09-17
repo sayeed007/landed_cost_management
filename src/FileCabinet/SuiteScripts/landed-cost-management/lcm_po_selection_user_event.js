@@ -22,7 +22,6 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
     disableBodyField(context.form, FIELDS.landedCostManagement.selectedPurchaseOrders);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
     renameSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
-      { fieldId: FIELDS.lcmLandedCosts.legacyCostVendorName, label: 'Legacy Cost Vendor' },
       { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
       { fieldId: FIELDS.lcmLandedCosts.targetType, label: 'Document Type' },
       { fieldId: FIELDS.lcmLandedCosts.costItemMap, label: 'LC Cost Category' },
@@ -32,16 +31,11 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
     ]);
     hideSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       FIELDS.lcmLandedCosts.parent,
-      FIELDS.lcmLandedCosts.legacyCostVendorName,
       FIELDS.lcmLandedCosts.billLineType,
       FIELDS.lcmLandedCosts.billType,
       FIELDS.lcmLandedCosts.subsidiary,
-      FIELDS.lcmLandedCosts.costProfile,
       FIELDS.lcmLandedCosts.costCategory,
-      FIELDS.lcmLandedCosts.expenseAccount,
       FIELDS.lcmLandedCosts.billItem,
-      FIELDS.lcmLandedCosts.debitAccount,
-      FIELDS.lcmLandedCosts.creditAccount,
       FIELDS.lcmLandedCosts.department,
       FIELDS.lcmLandedCosts.class,
     ]);
