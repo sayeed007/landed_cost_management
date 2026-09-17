@@ -182,8 +182,8 @@ On Landed Cost row LC Cost Category change:
 
 On Create Bill:
 
-- Group Vendor Bills by landed-cost Vendor Name, Subsidiary, Currency, and Exchange Rate.
-- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values. When appending to an existing generated Vendor Bill, matching existing cost lines are consolidated before the new amount is added. Recalculate Landed Cost remains an allocation repair action and does not rewrite an already-created Vendor Bill.
+- Group Vendor Bills by landed-cost Vendor Name, Subsidiary, and Currency. Exchange Rate does not split a same-vendor/same-currency Bill; the first Bill header rate is retained while each source row's rate remains authoritative for base-currency allocation.
+- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values. Matching uses the mapped/displayed category and item identity so NetSuite-sourced hidden IDs do not create duplicate lines. When appending to an existing generated Vendor Bill, matching existing cost lines are consolidated before the new amount is added. Recalculate Landed Cost remains an allocation repair action and does not rewrite an already-created Vendor Bill.
 - Use one merged item line with quantity `1`, summed amount as rate/amount, mapped LC Cost Item, shared LC Cost Category, and distinct row memos joined as the description.
 - Keep all original Landed Cost rows separate on the LCM record and mark each source row `Created` with the same generated Bill reference.
 - Mark `Cost Allocated In GRN` only after item-level allocation succeeds.

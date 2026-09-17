@@ -370,11 +370,13 @@ define(
     const defaults = getCostItemMapDefaults(row.costItemMap);
     if (!defaults.costCategory && !defaults.costCategoryText) return row;
 
-    if (!row.costCategory) {
+    // The mapping selector is the source of truth. Reapply both derived fields so
+    // stale hidden values cannot split otherwise equivalent Vendor Bill lines.
+    if (defaults.costCategory || defaults.costCategoryText) {
       row.costCategory = defaults.costCategory || row.costCategory;
       row.costCategoryText = defaults.costCategoryText || row.costCategoryText;
     }
-    if (!row.billItem) {
+    if (defaults.billItem || defaults.billItemText) {
       row.billItem = defaults.billItem || row.billItem;
       row.billItemText = defaults.billItemText || row.billItemText;
     }
@@ -964,8 +966,8 @@ define(
       row.vendor,
       row.subsidiary,
       row.currency,
-      getMergeIdentity(row.costCategory, row.costCategoryText),
-      getMergeIdentity(row.billItem, row.billItemText),
+      getMergeIdentity(row.costCategory, row.costCategoryText || row.costItemMapText),
+      getMergeIdentity(row.billItem, row.billItemText || row.costItemMapText),
       getMergeIdentity(row.allocationMethod, row.allocationMethodText),
     ]
       .map((value) => normalizeValue(value))
@@ -1025,17 +1027,26 @@ define(
     for (let line = 0; line < lineCount; line += 1) {
       const category = getSublistValue(bill, 'item', 'landedcostcategory', line);
       const item = getSublistValue(bill, 'item', 'item', line);
-      if (!matchesVendorBillLineField(category, getSublistText(bill, 'item', 'landedcostcategory', line), row.costCategory, row.costCategoryText)) {
+      const categoryText = getSublistText(bill, 'item', 'landedcostcategory', line);
+      const itemText = getSublistText(bill, 'item', 'item', line);
+      const description = getSublistValue(bill, 'item', 'description', line);
+      const categoryMatches =
+        matchesVendorBillLineField(category, categoryText, row.costCategory, row.costCategoryText || row.costItemMapText) ||
+        matchesVendorBillLineField('', description, '', row.costCategoryText || row.costItemMapText);
+      if (!categoryMatches) {
         continue;
       }
-      if (!matchesVendorBillLineField(item, getSublistText(bill, 'item', 'item', line), row.billItem, row.billItemText)) {
+      const itemMatches =
+        matchesVendorBillLineField(item, itemText, row.billItem, row.billItemText || row.costItemMapText) ||
+        matchesVendorBillLineField('', description, '', row.billItemText || row.costItemMapText);
+      if (!itemMatches) {
         continue;
       }
 
       matches.push({
         line,
         amount: getSublistValue(bill, 'item', 'amount', line),
-        description: getSublistValue(bill, 'item', 'description', line),
+        description,
       });
     }
 

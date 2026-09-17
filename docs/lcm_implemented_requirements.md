@@ -223,6 +223,8 @@ Inline edit was previously skipped entirely, so rows saved through inline edit o
 
 The client and child User Event resolve the mapping through the `costItemMapDefaults` Suitelet/library path rather than a legacy category fallback, so the immediate path and the save-time fallback cannot disagree. The hidden native `Cost Category` and `LC Cost Item` are always derived from the selected mapping record.
 
+Accounting rehydrates those derived values from the selected mapping before building Vendor Bill merge keys, so stale hidden child-row values cannot split equivalent Vendor Bill lines.
+
 ### Diagnostics
 
 `DEBUG` in `lcm_po_selection_config.js` controls two verbose aids. Turn them off once field ids are confirmed.
