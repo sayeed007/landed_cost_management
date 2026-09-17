@@ -633,25 +633,6 @@ ${defaults.reason || ''}`
   }
 
 
-  function openLcmVendorBillRepair() {
-    const rec = currentRecord.get();
-    if (!rec.id) {
-      window.alert('Save the Landed Cost Management record before repairing Vendor Bill lines.');
-      return;
-    }
-
-    const suiteletUrl = url.resolveScript({
-      scriptId: SCRIPTS.accountingSuitelet.scriptId,
-      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
-      params: {
-        parentId: rec.id,
-        action: 'billRepairPreview',
-      },
-    });
-
-    window.open(suiteletUrl, '_blank');
-  }
-
   function openReceivablePoSelector() {
     exposeWindowCallbacks();
     const rec = currentRecord.get();
@@ -973,7 +954,6 @@ ${defaults.reason || ''}`
     applyReceivablePoSelection,
     openLcmAccountingPreview,
     openLcmAllocationRecalculation,
-    openLcmVendorBillRepair,
     selectAllLcmTrackItems,
   };
 });
