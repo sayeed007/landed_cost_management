@@ -120,7 +120,25 @@ define([], () => {
     targetTypeText: 'Bill',
     billLineTypeText: 'Item',
     billTypeText: 'LC Bill',
+    shipmentStatusText: 'To Be Shipped',
   };
 
-  return { RECORDS, FIELDS, SUBLISTS, SCRIPTS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEFAULTS, DEBUG };
+  const SHIPMENT_STATUS = {
+    toBeShipped: 'To Be Shipped',
+    inTransit: 'In Transit',
+    partiallyReceived: 'Partially Received',
+    received: 'Received',
+  };
+
+  return {
+    RECORDS,
+    FIELDS,
+    SUBLISTS,
+    SCRIPTS,
+    TRANSACTION_FIELDS,
+    ACCOUNT_CONSTANTS,
+    DEFAULTS,
+    SHIPMENT_STATUS,
+    DEBUG,
+  };
 });

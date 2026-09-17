@@ -26,6 +26,7 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 
 - Header `custrecord_lcm_vendor` is the Purchase Order Vendor used to filter and validate selected POs.
 - Header `custrecord_lcm_selected_pos` is the stored selected PO list; users should populate it through the `Select Receivable POs` Suitelet so fully received/non-receivable POs are not selectable in normal UX.
+- Header `custrecord_lcm_shipment_status` is dynamic: `To Be Shipped` before any Landed Cost row exists, `In Transit` while Bill rows are pending GRN allocation, `Partially Received` after allocation when any Items row is partial, and `Received` after allocation when all Items rows are full.
 - Root record shipment numbering should use NetSuite custom record auto-numbering; the old text field `custrecord_lcm_shipment_number` is legacy compatibility only.
 - `LCM Items` should include only PO item lines that are receivable and still have remaining quantity to receive.
 - `Expected Quantity Receipt` means PO quantity still open for receipt.
@@ -35,8 +36,8 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - `PO Value` is `PO Rate * PO Exchange Rate * Quantity Receipt`, so it is comparable with base-currency landed-cost allocation.
 - `Total Value` is `Total Unit Cost * Quantity Receipt`; `Total Unit Cost` already includes converted PO rate plus allocated landed cost.
 - `Quantity Bill` is no longer user-facing.
-- Each Landed Cost row must have its own `Vendor Name`; bills are grouped by vendor, subsidiary, currency, and exchange rate so one LCM record can create multiple Vendor Bills.
-- Compatible Landed Cost rows are merged into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. If Effective Date, Location, Department, or Class differ inside that merge group, the generated Bill line uses the first source row's values.
+- Each Landed Cost row must have its own `Vendor Name`; bills are grouped by vendor, subsidiary, and currency so one LCM record can create multiple Vendor Bills. Exchange rate does not split a same-vendor/same-currency bill; the first transaction exchange rate is retained, while each source row's exchange rate remains authoritative for base-currency allocation.
+- Compatible Landed Cost rows are merged into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. If Effective Date, Location, Department, or Class differ inside that merge group, the generated Bill line uses the first source row's values.
 - When appending to an existing generated Vendor Bill, compatible new rows must be absorbed into matching existing cost lines and duplicate generated lines consolidated. `Recalculate Landed Cost` repairs allocation only and must not rewrite an already-created Vendor Bill.
 - Landed Cost `Bill Line Type` is always `Item` and should be hidden.
 - Landed Cost `Bill Type` is always `LC Bill` and should be hidden.

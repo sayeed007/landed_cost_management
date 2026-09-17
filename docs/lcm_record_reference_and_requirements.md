@@ -1,6 +1,6 @@
 # Landed Cost Management - Record Reference
 
-Last updated: 2026-09-10
+Last updated: 2026-09-17
 
 This document is the working record and field reference for the Landed Cost Management customization. It captures the current NetSuite custom records, field usage, and parent-child relationships. For implemented behavior and requirement chunks, see [lcm_implemented_requirements.md](./lcm_implemented_requirements.md).
 
@@ -23,7 +23,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Purchase Order Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor used only for selected PO filtering and validation. Landed Cost row `Vendor Name` drives generated Vendor Bills. |
 | Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
 | Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which only lists POs that have at least one receivable open item line for the selected Purchase Order Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
-| Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Shipment status classification. |
+| Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Dynamic shipment state: `To Be Shipped` before any Landed Cost row exists, `In Transit` after a row exists but before all Bill rows are allocated, `Partially Received` after allocation when any item row is partial, and `Received` when all item rows are full. |
 | Shipment Number | `custrecord_lcm_shipment_number` | Text | Legacy hidden shipment number text field. Shipment numbering now uses the custom record auto-number/name with `SHIP-` prefix and 5 minimum digits. |
 | Shipment Date | `custrecord_lcm_shipment_date` | Date | Shipment date for the landed cost record. |
 | LC Loan Number | `custrecord_lcm_lc_laon_number` | Text | LC loan number. Existing spelling in NetSuite is `laon`. |
@@ -99,7 +99,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Name | Field ID | Type | What this is for |
 | --- | --- | --- | --- |
 | Document Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. Mandatory; defaults to `Bill`. Existing field ID is retained for compatibility. |
-| Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. `Create Bill` groups rows by vendor, subsidiary, currency, and exchange rate so one LCM record can create multiple Vendor Bills. Compatible rows inside a Bill group are merged into one Vendor Bill item line when category, cost item, and allocation method also match; effective date and classifications are inherited from the first source row if they differ. |
+| Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. `Create Bill` groups rows by vendor, subsidiary, and currency so one LCM record can create multiple Vendor Bills. Compatible rows inside a Bill group are merged into one Vendor Bill item line when category, cost item, and allocation method also match; effective date and classifications are inherited from the first source row if they differ. |
 | LC Cost Category | `custrecord_lcm_lcm_cost_item_map` | Select, `customrecord_lcm_cost_item_map` | User-facing selector. Only active mapping records appear as options, so users can pick only configured LC Cost Category and LC Cost Item combinations. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Hidden select, `customlist_lcm_bill_line_type` | Fixed hidden value. Landed-cost bills always create Vendor Bill item lines. |
 | Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Hidden select, `customlist_bill_type` | Fixed hidden Vendor Bill body Bill Type source. Generated Vendor Bills use `LC Bill` through `custbody12`. |

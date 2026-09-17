@@ -2,14 +2,26 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_po_selection_config', './lcm_accounting_lib'], (
+define(
+  [
+    'N/error',
+    'N/format',
+    'N/log',
+    'N/record',
+    'N/ui/serverWidget',
+    './lcm_po_selection_config',
+    './lcm_accounting_lib',
+    './lcm_shipment_status_lib',
+  ],
+  (
   error,
   format,
   log,
   record,
   serverWidget,
   config,
-  accounting
+  accounting,
+  shipmentStatus
 ) => {
   const { FIELDS, RECORDS } = config;
 
@@ -215,6 +227,16 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
         notifyOff: false,
       });
     }
+  }
+
+  function afterSubmit(context) {
+    const source = context.type === context.UserEventType.DELETE ? context.oldRecord : context.newRecord;
+    if (!source) return;
+
+    const parentId =
+      getValueIfPresent(source, FIELDS.lcmLandedCosts.parent) ||
+      getValueIfPresent(context.oldRecord, FIELDS.lcmLandedCosts.parent);
+    if (parentId) shipmentStatus.recalculate(parentId);
   }
 
   function sourceVendorDefaults(rec) {
@@ -465,5 +487,5 @@ define(['N/error', 'N/format', 'N/log', 'N/record', 'N/ui/serverWidget', './lcm_
     }
   }
 
-  return { beforeLoad, beforeSubmit };
+  return { beforeLoad, beforeSubmit, afterSubmit };
 });

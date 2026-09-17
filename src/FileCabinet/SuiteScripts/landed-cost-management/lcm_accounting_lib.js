@@ -2,7 +2,9 @@
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
  */
-define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'], (format, log, record, search, config) => {
+define(
+  ['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config', './lcm_shipment_status_lib'],
+  (format, log, record, search, config, shipmentStatus) => {
   const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEFAULTS } = config;
   const STATUS = {
     pending: 'Pending',
@@ -135,6 +137,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       const rowsForAllocation = getCreatedBillRows(parentId);
       allocateCreatedCosts(parentId, rowsForAllocation, { reset: true });
       markCostRowsAllocated(rowsForAllocation);
+      shipmentStatus.recalculate(parentId);
       allocatedRowCount = rowsForAllocation.length;
     }
 
@@ -192,6 +195,7 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
 
     allocateCreatedCosts(parentId, preview.createdBillRows, { reset: true });
     markCostRowsAllocated(preview.createdBillRows);
+    shipmentStatus.recalculate(parentId);
 
     return {
       mode: preview.mode,
@@ -857,8 +861,11 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
   }
 
   function buildGroupKey(row, mode) {
+    // A Vendor Bill has one currency and one header exchange rate. Source row rates are still
+    // applied independently during base-currency GRN allocation, so rate differences must not
+    // create duplicate same-vendor/same-currency bills.
     return mode === MODES.bill
-      ? [row.vendor, row.subsidiary, row.currency, row.exchangeRate || 1].join('|')
+      ? [row.vendor, row.subsidiary, row.currency].join('|')
       : [row.subsidiary, row.currency].join('|');
   }
 
@@ -906,9 +913,12 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
     });
 
     // Evaluated after the lines exist; on a new Bill the item sublist is empty up to here.
+    const existingRowsForBill = (group.existingRows || []).filter(
+      (row) => !group.createdTransactionId || row.createdTransactionId === group.createdTransactionId
+    );
     applyVendorBillNativeLandedCosts(
       bill,
-      (group.existingRows || []).concat(group.rows || []),
+      existingRowsForBill.concat(group.rows || []),
       firstRow.allocationMethodText,
       costLines
     );
@@ -954,7 +964,6 @@ define(['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config'
       row.vendor,
       row.subsidiary,
       row.currency,
-      row.exchangeRate || 1,
       row.costCategory || row.costCategoryText,
       row.billItem || row.billItemText,
       row.allocationMethod || row.allocationMethodText,

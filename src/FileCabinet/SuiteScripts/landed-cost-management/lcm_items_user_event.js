@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', './lcm_po_selection_config'], (error, config) => {
+define(['N/error', './lcm_po_selection_config', './lcm_shipment_status_lib'], (error, config, shipmentStatus) => {
   const { FIELDS } = config;
 
   function beforeSubmit(context) {
@@ -43,6 +43,16 @@ define(['N/error', './lcm_po_selection_config'], (error, config) => {
     );
   }
 
+  function afterSubmit(context) {
+    const source = context.type === context.UserEventType.DELETE ? context.oldRecord : context.newRecord;
+    if (!source) return;
+
+    const parentId =
+      getValue(source, FIELDS.lcmItems.parent) ||
+      getValue(context.oldRecord, FIELDS.lcmItems.parent);
+    if (parentId) shipmentStatus.recalculate(parentId);
+  }
+
   function getValue(rec, fieldId) {
     try {
       return rec.getValue({ fieldId });
@@ -70,5 +80,5 @@ define(['N/error', './lcm_po_selection_config'], (error, config) => {
     return Math.round((Number(value) || 0) * 100) / 100;
   }
 
-  return { beforeSubmit };
+  return { beforeSubmit, afterSubmit };
 });

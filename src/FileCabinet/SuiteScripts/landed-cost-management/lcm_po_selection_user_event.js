@@ -2,14 +2,17 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection_config', './lcm_po_selection_lib'], (
-  error,
-  format,
-  log,
-  serverWidget,
-  config,
-  lib
-) => {
+define(
+  [
+    'N/error',
+    'N/format',
+    'N/log',
+    'N/ui/serverWidget',
+    './lcm_po_selection_config',
+    './lcm_po_selection_lib',
+    './lcm_shipment_status_lib',
+  ],
+  (error, format, log, serverWidget, config, lib, shipmentStatus) => {
   const { FIELDS, SUBLISTS } = config;
 
   function beforeLoad(context) {
@@ -17,6 +20,8 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
 
     context.form.clientScriptModulePath = './lcm_po_selection_client.js';
 
+    applyInitialShipmentStatus(context);
+    showCurrentShipmentStatus(context);
     recalculatePersistedItemValues(context);
     orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.selectedPurchaseOrders);
@@ -99,6 +104,7 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
 
   function beforeSubmit(context) {
     if (context.type === context.UserEventType.DELETE) return;
+    setInitialShipmentStatus(context.newRecord);
     sourceHeaderVendorDefaults(context.newRecord);
     validateSelectedPurchaseOrders(context.newRecord);
     if (context.type === context.UserEventType.CREATE || context.type === context.UserEventType.COPY) return;
@@ -115,24 +121,101 @@ define(['N/error', 'N/format', 'N/log', 'N/ui/serverWidget', './lcm_po_selection
 
   function afterSubmit(context) {
     if (context.type === context.UserEventType.DELETE) return;
-    if (!shouldSyncPoItems(context)) return;
 
     const parentId = context.newRecord.id;
-    const selectedPoIds = lib.normalizeIds(
-      context.newRecord.getValue({
-        fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders,
-      })
-    );
-    const vendorId = context.newRecord.getValue({
-      fieldId: FIELDS.landedCostManagement.vendor,
-    });
+    if (shouldSyncPoItems(context)) {
+      const selectedPoIds = lib.normalizeIds(
+        context.newRecord.getValue({
+          fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders,
+        })
+      );
+      const vendorId = context.newRecord.getValue({
+        fieldId: FIELDS.landedCostManagement.vendor,
+      });
+
+      try {
+        const summary = lib.syncPersistedItems(parentId, selectedPoIds, vendorId);
+        log.audit({ title: 'LCM PO item sync complete', details: summary });
+      } catch (error) {
+        log.error({ title: 'LCM PO item sync failed', details: error });
+        throw error;
+      }
+    }
+
+    refreshShipmentStatus(parentId);
+  }
+
+  function showCurrentShipmentStatus(context) {
+    if (!context.newRecord.id) return;
+    if (context.type !== context.UserEventType.VIEW && context.type !== context.UserEventType.EDIT) return;
 
     try {
-      const summary = lib.syncPersistedItems(parentId, selectedPoIds, vendorId);
-      log.audit({ title: 'LCM PO item sync complete', details: summary });
+      const summary = shipmentStatus.recalculate(context.newRecord.id);
+      if (summary.statusValue) {
+        context.newRecord.setValue({
+          fieldId: FIELDS.landedCostManagement.shipmentStatus,
+          value: summary.statusValue,
+        });
+      } else if (summary.statusText) {
+        context.newRecord.setText({
+          fieldId: FIELDS.landedCostManagement.shipmentStatus,
+          text: summary.statusText,
+        });
+      }
     } catch (error) {
-      log.error({ title: 'LCM PO item sync failed', details: error });
-      throw error;
+      log.audit({
+        title: 'LCM Shipment Status display refresh skipped',
+        details: error.message || error,
+      });
+    }
+  }
+
+  function applyInitialShipmentStatus(context) {
+    if (context.type !== context.UserEventType.CREATE && context.type !== context.UserEventType.COPY) return;
+
+    const fieldId = FIELDS.landedCostManagement.shipmentStatus;
+    const statusText = config.DEFAULTS.shipmentStatusText;
+    try {
+      if (!context.newRecord.getValue({ fieldId })) {
+        context.newRecord.setText({ fieldId, text: statusText });
+      }
+    } catch (recordError) {
+      log.audit({
+        title: 'LCM initial Shipment Status record default skipped',
+        details: recordError.message || recordError,
+      });
+    }
+
+    try {
+      const field = context.form.getField({ id: fieldId });
+      field.defaultValue = statusText;
+    } catch (formError) {
+      log.audit({
+        title: 'LCM initial Shipment Status form default skipped',
+        details: formError.message || formError,
+      });
+    }
+  }
+
+  function setInitialShipmentStatus(rec) {
+    try {
+      if (rec.getValue({ fieldId: FIELDS.landedCostManagement.shipmentStatus })) return;
+      rec.setText({
+        fieldId: FIELDS.landedCostManagement.shipmentStatus,
+        text: config.DEFAULTS.shipmentStatusText,
+      });
+    } catch (error) {
+      log.audit({
+        title: 'LCM initial Shipment Status was not applied',
+        details: error.message || error,
+      });
+    }
+  }
+
+  function refreshShipmentStatus(parentId) {
+    const summary = shipmentStatus.recalculate(parentId);
+    if (summary.updated) {
+      log.audit({ title: 'LCM Shipment Status updated', details: summary });
     }
   }
 

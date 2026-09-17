@@ -63,7 +63,7 @@ Implementation detail:
 - Item rows are generated only for receivable PO item lines with positive open receipt quantity.
 - `Quantity Receipt` is editable after generation and drives `Receive Status`, `Quantity Remaining`, converted `PO Value`, allocation quantity, and `Total Value`.
 - The client recalculates derived values immediately in the sublist; `customscript_lcm_items_ue` repeats the calculation on save for inline edits, imports, and non-standard forms.
-- `Quantity Bill` remains only as a hidden legacy field.
+- The deprecated `Quantity Bill` field was removed from the account and SDF definition.
 - PO uses the PO internal ID. NetSuite displays the transaction number (`tranid`) to users.
 
 ## 3. Delete/Rebuild Behavior Instead of Dedupe
@@ -118,6 +118,7 @@ Open caveat:
 | Shared Config | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_config.js` | Central record IDs, field IDs, sublist IDs, and script deployment IDs. |
 | Shared Library | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_po_selection_lib.js` | PO search, item line transformation, and persisted child row reconcile logic. |
 | Accounting Library | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_accounting_lib.js` | Landed Cost validation, transaction grouping/creation, duplicate blocking, cost category item mapping, and item cost allocation. |
+| Shipment Status Library | N/A module file | `src/FileCabinet/SuiteScripts/landed-cost-management/lcm_shipment_status_lib.js` | Derives and persists the root Shipment Status from Landed Cost rows, GRN allocation flags, and item Receive Status values. |
 
 ## 7. Current Deployment Notes
 
@@ -152,8 +153,8 @@ Implemented behavior:
   - `Recalculate Landed Cost`
 - Button clicks open a Suitelet preview before any transaction is created.
 - After confirmation, the result page includes a `Back to Landed Cost Management` link to return to the source LCM record.
-- `Create Bill` processes uncreated Landed Cost rows marked `Bill`, grouped by line Vendor Name, subsidiary, currency, and exchange rate. One LCM record can therefore create multiple Vendor Bills for different vendors, currencies, or exchange-rate contexts.
-- Within each Vendor Bill group, compatible Landed Cost rows merge into one Vendor Bill item line when Vendor, Subsidiary, Currency, Exchange Rate, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values. The original Landed Cost rows remain separate and are all linked back to the created Bill. When a compatible row is added to an existing generated Vendor Bill, the append flow also absorbs matching existing cost lines and removes duplicate generated lines. Already-created Vendor Bills are not rewritten by Recalculate Landed Cost.
+- `Create Bill` processes uncreated Landed Cost rows marked `Bill`, grouped by line Vendor Name, subsidiary, and currency. One LCM record can therefore create multiple Vendor Bills for different vendors or currencies. Exchange rate does not split a same-vendor/same-currency bill; the first bill exchange rate is retained for the transaction while each source row's exchange rate remains authoritative for base-currency allocation.
+- Within each Vendor Bill group, compatible Landed Cost rows merge into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values. The original Landed Cost rows remain separate and are all linked back to the created Bill. When a compatible row is added to an existing generated Vendor Bill, the append flow also absorbs matching existing cost lines and removes duplicate generated lines. Already-created Vendor Bills are not rewritten by Recalculate Landed Cost.
 - Generated Vendor Bills set body field `custbody12` to `LC Bill`.
 - Generated Vendor Bills set Bill `Landed Cost > Cost Allocation Method` from the Landed Cost row `Allocation Method`; the LCM default is `Value`.
 - Bill rows always create Vendor Bill `item` lines. The old `Bill Line Type` field is hidden and fixed to `Item`.
@@ -177,6 +178,17 @@ Implemented behavior:
 - Created Landed Cost rows are locked from edits to transaction-driving fields by a child User Event.
 - Selecting a mapped Landed Cost Category attempts to default `Allocation Method` from the mapped native NetSuite landed cost category metadata, falling back to `Value` if the account-specific native field is not readable.
 - The root form has `Select All Track Items` in edit/create/copy mode to check all `Track Item` boxes on the Items sublist before creating accounting.
+
+### Shipment Status
+
+The root `Shipment Status` (`custrecord_lcm_shipment_status`) is recalculated after root, Items, and Landed Cost saves, after accounting allocation, and when an existing LCM record is opened in View/Edit mode:
+
+- `To Be Shipped`: no Landed Cost child rows exist.
+- `In Transit`: at least one Landed Cost row exists, but there is no created Bill row or not every created Bill row has `Cost Allocated In GRN` checked.
+- `Partially Received`: all created Bill rows are allocated and at least one Items row has `Receive Status` other than `full`.
+- `Received`: all created Bill rows are allocated and every Items row has `Receive Status` `full`.
+
+The status is written using the Shipment Status list text, so account-generated list value IDs are not hard-coded.
 
 Allocation behavior:
 
