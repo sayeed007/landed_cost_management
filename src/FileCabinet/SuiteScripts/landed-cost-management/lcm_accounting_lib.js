@@ -964,12 +964,17 @@ define(
       row.vendor,
       row.subsidiary,
       row.currency,
-      row.costCategory || row.costCategoryText,
-      row.billItem || row.billItemText,
-      row.allocationMethod || row.allocationMethodText,
+      getMergeIdentity(row.costCategory, row.costCategoryText),
+      getMergeIdentity(row.billItem, row.billItemText),
+      getMergeIdentity(row.allocationMethod, row.allocationMethodText),
     ]
       .map((value) => normalizeValue(value))
       .join('|');
+  }
+
+  function getMergeIdentity(value, text) {
+    const textIdentity = normalizeChoice(text);
+    return textIdentity || normalizeValue(value).trim().toLowerCase();
   }
 
   function addDistinctMemo(merged, memo) {
@@ -1038,13 +1043,17 @@ define(
   }
 
   function matchesVendorBillLineField(lineValue, lineText, rowValue, rowText) {
+    const normalizedLineText = normalizeChoice(lineText);
+    const normalizedRowText = normalizeChoice(rowText);
+    if (normalizedLineText && normalizedRowText) return normalizedLineText === normalizedRowText;
+
     const normalizedLineValue = normalizeValue(lineValue);
     const normalizedRowValue = normalizeValue(rowValue);
     if (normalizedLineValue && normalizedRowValue) return normalizedLineValue === normalizedRowValue;
 
-    const normalizedLineText = normalizeValue(lineText).trim();
-    const normalizedRowText = normalizeValue(rowText).trim();
-    return Boolean(normalizedLineText && normalizedRowText && normalizedLineText === normalizedRowText);
+    const fallbackLineText = normalizeValue(lineText).trim();
+    const fallbackRowText = normalizeValue(rowText).trim();
+    return Boolean(fallbackLineText && fallbackRowText && fallbackLineText === fallbackRowText);
   }
 
   function mergeVendorBillLineDescriptions(descriptions, fallback) {
