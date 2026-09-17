@@ -217,12 +217,14 @@ define(
   // LCM record, and it is total-preserving: the surviving line carries the sum of the lines it
   // replaces, never the Landed Cost row total, so a Bill's total can never move. Nothing else
   // on the Bill is touched, and no automatic flow calls it.
-  function buildVendorBillRepairPreview(parentId) {
+  function buildVendorBillRepairPreview(parentId, options) {
+    const includeLegacyLines = Boolean(options && options.includeLegacyLines);
     const preview = {
       ok: false,
       mode: 'repair',
       modeText: 'Vendor Bill Line Repair',
       parentId: String(parentId || ''),
+      includeLegacyLines,
       bills: [],
       errors: [],
     };
@@ -253,21 +255,26 @@ define(
 
     order.forEach((billId) => {
       try {
-        preview.bills.push(planVendorBillLineRepair(billId, rowsByBill[billId]));
+        preview.bills.push(planVendorBillLineRepair(billId, rowsByBill[billId], includeLegacyLines));
       } catch (error) {
         preview.errors.push(`Vendor Bill ${billId} could not be read: ${error.message || error}`);
       }
     });
 
+    preview.legacyCandidateCount = preview.bills.reduce((total, plan) => total + plan.legacyLineCount, 0);
     const repairable = preview.bills.filter((plan) => plan.needsRepair);
     if (!preview.errors.length && !repairable.length) {
-      preview.errors.push('No duplicate or untagged generated cost lines were found on the created Vendor Bills.');
+      preview.errors.push(
+        includeLegacyLines
+          ? 'No duplicate or untagged cost lines were found on the created Vendor Bills.'
+          : 'No duplicate or untagged cost lines carrying this LCM record\'s line marker were found on the created Vendor Bills.'
+      );
     }
     preview.ok = preview.errors.length === 0 && repairable.length > 0;
     return preview;
   }
 
-  function planVendorBillLineRepair(billId, billRows) {
+  function planVendorBillLineRepair(billId, billRows, includeLegacyLines) {
     const bill = record.load({ type: record.Type.VENDOR_BILL, id: billId, isDynamic: false });
     const mergedRows = buildMergedVendorBillRows(billRows);
     const plan = {
@@ -279,54 +286,61 @@ define(
       targetLineCount: mergedRows.length,
       duplicateLineCount: 0,
       untaggedLineCount: 0,
+      legacyLineCount: 0,
       unmatchedGroupCount: 0,
       blockedGroups: [],
+      legacyLines: [],
       groups: [],
       mergedRows,
+      includeLegacyLines: Boolean(includeLegacyLines),
       needsRepair: false,
     };
 
-    const handledCostIdentities = {};
-    mergedRows.forEach((mergedRow) => {
-      const costIdentity = buildCostIdentity(mergedRow);
-      if (handledCostIdentities[costIdentity]) return;
-      handledCostIdentities[costIdentity] = true;
+    // A Vendor Bill has one header-level Cost Allocation Method. Consolidating by category and
+    // item across rows that asked for different methods would merge lines the header can only
+    // ever describe with one of them, so such a Bill is reported and left alone entirely -
+    // the same rule Create Bill enforces, applied to history.
+    const methodConflict = describeAllocationMethodConflict(billRows);
+    if (methodConflict) {
+      plan.blockedGroups.push(`This Bill's Landed Cost rows disagree about the Allocation Method, so none of its lines can be safely consolidated: ${methodConflict}`);
+      return plan;
+    }
 
-      const lines = findMatchingVendorBillCostLines(bill, mergedRow);
+    mergedRows.forEach((mergedRow) => {
+      const lines = findMatchingVendorBillCostLines(bill, mergedRow, {
+        allowUnmarkedLines: includeLegacyLines,
+      });
       const lineTotal = sumVendorBillLineAmounts(lines);
       const untagged = lines.filter((line) => !line.hasCategory).length;
-      // Everything this LCM record created against this Bill for this Cost Category and LC
-      // Cost Item, whatever Allocation Method each row asked for.
-      const ownedAmount = sumRowsByCostIdentity(mergedRows, costIdentity);
-      const owned = matchedLinesAreOwned(lines, ownedAmount);
+      const unmarked = lines.filter((line) => !line.marked);
       const group = {
         lineKey: mergedRow.lineKey,
         costCategoryText: mergedRow.costCategoryText || mergedRow.costItemMapText || '',
         billItemText: mergedRow.billItemText || '',
         sourceRowIds: mergedRow.sourceRowIds,
-        sourceAmount: ownedAmount,
+        sourceAmount: mergedRow.amount,
         matchedLines: lines.map((line) => line.line),
         matchedLineTotal: lineTotal,
         untaggedLineCount: untagged,
-        owned,
+        unmarkedLineCount: unmarked.length,
       };
       plan.groups.push(group);
 
+      // Every unmarked line is listed individually. This is the whole basis on which the user
+      // decides, so it shows what they would be agreeing to merge and delete, not a count.
+      unmarked.forEach((line) => {
+        plan.legacyLines.push({
+          line: line.line,
+          amount: line.amount,
+          description: line.description,
+          costCategoryText: group.costCategoryText,
+          billItemText: group.billItemText,
+        });
+      });
+      plan.legacyLineCount += unmarked.length;
+
       if (!lines.length) {
         plan.unmatchedGroupCount += 1;
-        return;
-      }
-
-      if (!owned) {
-        // The matched lines do not reconcile with what this LCM record created, so at least
-        // one of them was written by something else. Report it and change nothing: a repair
-        // that cannot prove what it is deleting is not a repair.
-        plan.blockedGroups.push(
-          `${group.costCategoryText || group.lineKey}: Bill lines ${group.matchedLines.join(', ')} total ${lineTotal}, ` +
-            `but this LCM record created ${ownedAmount} for that Cost Category and LC Cost Item. ` +
-            'At least one of those lines was not created by this LCM record, so they are left untouched. ' +
-            'Correct the Bill by hand if they really should be one line.'
-        );
         return;
       }
 
@@ -338,8 +352,9 @@ define(
     return plan;
   }
 
-  function repairCreatedVendorBillLines(parentId) {
-    const preview = buildVendorBillRepairPreview(parentId);
+  function repairCreatedVendorBillLines(parentId, options) {
+    const includeLegacyLines = Boolean(options && options.includeLegacyLines);
+    const preview = buildVendorBillRepairPreview(parentId, { includeLegacyLines });
     if (!preview.ok) {
       const error = new Error(preview.errors.join('\n') || 'No Vendor Bill lines to repair.');
       error.preview = preview;
@@ -350,7 +365,7 @@ define(
     let removedLineCount = 0;
     preview.bills.forEach((plan) => {
       if (!plan.needsRepair) return;
-      const result = applyVendorBillLineRepair(plan);
+      const result = applyVendorBillLineRepair(plan, includeLegacyLines);
       removedLineCount += result.removedLineCount;
       repaired.push(result.transaction);
     });
@@ -362,44 +377,29 @@ define(
       processedRowCount: 0,
       allocatedRowCount: 0,
       removedLineCount,
+      includeLegacyLines,
       skippedRows: [],
       allocationTargetCount: 0,
       bills: preview.bills,
     };
   }
 
-  function applyVendorBillLineRepair(plan) {
+  function applyVendorBillLineRepair(plan, includeLegacyLines) {
     const bill = record.load({ type: record.Type.VENDOR_BILL, id: plan.billId, isDynamic: true });
     let removedLineCount = 0;
     let consolidatedGroupCount = 0;
 
     // Re-matched against the freshly loaded record: every removal shifts the line indexes the
     // preview captured, so the preview is a plan and never a set of coordinates to write to.
-    const handledCostIdentities = {};
     plan.mergedRows.forEach((mergedRow) => {
-      // Only the first merged row for a given Cost Category / LC Cost Item pair consolidates
-      // its lines. A second row differing only by Allocation Method would otherwise re-match
-      // and re-collapse the same lines.
-      const costIdentity = buildCostIdentity(mergedRow);
-      if (handledCostIdentities[costIdentity]) return;
-      handledCostIdentities[costIdentity] = true;
-
-      const lines = findMatchingVendorBillCostLines(bill, mergedRow);
+      const lines = findMatchingVendorBillCostLines(bill, mergedRow, {
+        allowUnmarkedLines: includeLegacyLines,
+      });
       if (!lines.length) return;
-      if (lines.length === 1 && lines[0].hasCategory) return;
+      // One line that is already marked and tagged is already in its final shape.
+      if (lines.length === 1 && lines[0].hasCategory && lines[0].marked) return;
 
-      // Re-checked against the reloaded record rather than trusted from the preview, because
-      // the Bill can have changed between the preview and the confirmation.
       const lineTotal = sumVendorBillLineAmounts(lines);
-      const ownedAmount = sumRowsByCostIdentity(plan.mergedRows, costIdentity);
-      if (!matchedLinesAreOwned(lines, ownedAmount)) {
-        log.audit({
-          title: 'LCM Vendor Bill line repair skipped',
-          details: `Vendor Bill ${plan.billId}: lines ${lines.map((line) => line.line).join(', ')} total ${lineTotal}, but this LCM record created ${ownedAmount} for key ${mergedRow.lineKey}. Left untouched.`,
-        });
-        return;
-      }
-
       const description = mergeVendorBillLineDescriptions(
         lines.map((line) => line.description),
         mergedRow.memo || mergedRow.costCategoryText || mergedRow.billItemText
@@ -418,8 +418,8 @@ define(
       log.audit({
         title: 'LCM Vendor Bill line repair',
         details: `Vendor Bill ${plan.billId}: consolidated lines ${lines
-          .map((line) => line.line)
-          .join(', ')} into one line at ${lineTotal} for key ${mergedRow.lineKey}. Landed Cost rows ${mergedRow.sourceRowIds.join('+')} are unchanged.`,
+          .map((line) => `${line.line}(${line.reason})`)
+          .join(', ')} into one marked line at ${lineTotal} for key ${mergedRow.lineKey}. Landed Cost rows ${mergedRow.sourceRowIds.join('+')} are unchanged.`,
       });
     });
 
@@ -501,6 +501,8 @@ define(
         const createdTransactionId = getValue(result, f.createdTransactionId);
         rows.push({
           id: getValue(result, 'internalid'),
+          // Needed to build the Vendor Bill line ownership marker.
+          parentId: String(parentId),
           targetType: getValue(result, f.targetType),
           targetTypeText: targetText,
           targetMode:
@@ -1140,24 +1142,29 @@ define(
   function findAllocationMethodConflicts(groups) {
     const conflicts = [];
     (groups || []).forEach((group) => {
-      const rowIdsByMethod = {};
-      (group.rows || []).concat(group.existingRows || []).forEach((row) => {
-        const method = getVendorBillLandedCostMethodText(row.allocationMethodText);
-        if (!rowIdsByMethod[method]) rowIdsByMethod[method] = [];
-        rowIdsByMethod[method].push(row.id);
-      });
-
-      const methods = Object.keys(rowIdsByMethod);
-      if (methods.length < 2) return;
-      conflicts.push(
-        `${group.vendorText || group.vendor} / ${group.currencyText || group.currency}: a Vendor Bill has one ` +
-          `Cost Allocation Method, but these Landed Cost rows ask for ${methods
-            .map((method) => `${method} (row ${rowIdsByMethod[method].join(', ')})`)
-            .join(' and ')}. Set one Allocation Method for this vendor/currency, or move the differing rows ` +
-          'onto their own LCM record so they get their own Vendor Bill.'
-      );
+      const conflict = describeAllocationMethodConflict((group.rows || []).concat(group.existingRows || []));
+      if (!conflict) return;
+      conflicts.push(`${group.vendorText || group.vendor} / ${group.currencyText || group.currency}: ${conflict}`);
     });
     return conflicts;
+  }
+
+  function describeAllocationMethodConflict(rows) {
+    const rowIdsByMethod = {};
+    (rows || []).forEach((row) => {
+      const method = getVendorBillLandedCostMethodText(row.allocationMethodText);
+      if (!rowIdsByMethod[method]) rowIdsByMethod[method] = [];
+      rowIdsByMethod[method].push(row.id);
+    });
+
+    const methods = Object.keys(rowIdsByMethod);
+    if (methods.length < 2) return '';
+    return (
+      'a Vendor Bill has one Cost Allocation Method, but these Landed Cost rows ask for ' +
+      `${methods.map((method) => `${method} (row ${rowIdsByMethod[method].join(', ')})`).join(' and ')}. ` +
+      'Set one Allocation Method for this vendor/currency, or move the differing rows onto their own ' +
+      'LCM record so they get their own Vendor Bill.'
+    );
   }
 
   function buildGroupKey(row, mode) {
@@ -1222,18 +1229,11 @@ define(
       (row) => !group.createdTransactionId || row.createdTransactionId === group.createdTransactionId
     );
 
-    // Backstop only: buildPreview refuses a group whose rows disagree about the Allocation
-    // Method, so two merged rows here should never share a cost identity. If one ever does,
-    // the second must not match the line the first just wrote - that would undo the split.
-    const handledCostIdentities = {};
+    // Each merged row carries its own marker, so a row can only ever match the line written
+    // for its own merge group - including against a line written moments ago in this same
+    // run. No extra guard is needed to keep distinct merge groups on distinct lines.
     mergedRows.forEach((row) => {
-      const costIdentity = buildCostIdentity(row);
-      const forceNewLine = Boolean(handledCostIdentities[costIdentity]);
-      handledCostIdentities[costIdentity] = true;
-      const ownedAmount = group.createdTransactionId
-        ? sumRowsByCostIdentity(existingRowsForBill, costIdentity)
-        : 0;
-      if (addOrMergeVendorBillItemLine(bill, row, { forceNewLine, ownedAmount })) costLines.push(row);
+      if (addOrMergeVendorBillItemLine(bill, row)) costLines.push(row);
     });
 
     applyVendorBillNativeLandedCosts(
@@ -1336,25 +1336,33 @@ define(
     return `${prefix}|-`;
   }
 
-  // A Vendor Bill line carries no marker naming the LCM record that wrote it, so ownership is
-  // proved arithmetically instead: the Landed Cost rows this LCM record has already created
-  // against this Bill for this cost identity must account for exactly the amount sitting on
-  // the matched lines. If they do not, at least one matched line came from somewhere else -
-  // a manually added line with the same item and category, most likely - and it must not be
-  // merged into or removed.
-  function matchedLinesAreOwned(matchedLines, expectedAmount) {
-    if (expectedAmount === null || expectedAmount === undefined) return false;
-    return sumVendorBillLineAmounts(matchedLines) === roundCurrency(expectedAmount);
+  // The ownership marker stamped on every generated landed-cost line. It names the LCM record
+  // and the exact merge group, so a line either is this record's line for this group or it is
+  // not - there is nothing to infer. Amount arithmetic was tried here first and is not a
+  // proof: a generated 600 line beside a manually added 400 line reconciles perfectly against
+  // a 1,000 source total while identifying neither line.
+  function buildVendorBillSourceKey(row) {
+    const parentId = normalizeValue(row.parentId).trim();
+    if (!parentId) return '';
+    return `LCM${parentId}::${row.lineKey || buildVendorBillLineKey(row)}`;
   }
 
-  function sumRowsByCostIdentity(rows, costIdentity) {
-    return roundCurrency(
-      (rows || []).reduce(
-        (total, row) => (buildCostIdentity(row) === costIdentity ? total + (row.amount || 0) : total),
-        0
-      )
+  function getVendorBillLineSourceKey(bill, line) {
+    return normalizeValue(getSublistValue(bill, 'item', TRANSACTION_FIELDS.vendorBillLine.sourceKey, line)).trim();
+  }
+
+  function setVendorBillLineSourceKey(bill, row) {
+    const sourceKey = buildVendorBillSourceKey(row);
+    if (!sourceKey) return false;
+    return setCurrentSublistFieldByValueOrText(
+      bill,
+      'item',
+      TRANSACTION_FIELDS.vendorBillLine.sourceKey,
+      [sourceKey],
+      [sourceKey]
     );
   }
+
 
   // Compares one identity-bearing field between a Vendor Bill line and a Landed Cost row.
   // Returns 'match', 'mismatch', or 'unknown' when the two sides share no comparable form.
@@ -1380,8 +1388,10 @@ define(
   function addOrMergeVendorBillItemLine(bill, row, options) {
     const lineKey = row.lineKey || buildVendorBillLineKey(row);
     const sourceRowIds = (row.sourceRowIds || [row.id]).join('+');
-    const existingLines = options && options.forceNewLine ? [] : findMatchingVendorBillCostLines(bill, row);
-    const ownedAmount = options ? options.ownedAmount : null;
+    // Only marker-matched lines are considered here, so every match is provably this LCM
+    // record's own line for this merge group. Unmarked lines - legacy or hand-added - are
+    // never touched by an append; the repair flow deals with those, with the user's consent.
+    const existingLines = findMatchingVendorBillCostLines(bill, row);
 
     function addNewLineInstead(reason) {
       log.audit({
@@ -1391,18 +1401,9 @@ define(
       return addVendorBillItemLine(bill, row);
     }
 
-    if (!existingLines.length) return addNewLineInstead('no compatible existing line');
+    if (!existingLines.length) return addNewLineInstead('no line on this Bill carries this merge key');
 
     const existingAmount = sumVendorBillLineAmounts(existingLines);
-    if (!matchedLinesAreOwned(existingLines, ownedAmount)) {
-      // Merging would rewrite, and consolidating would delete, a line this LCM record cannot
-      // prove it wrote. Adding a separate line is the only non-destructive option.
-      return addNewLineInstead(
-        `matched lines ${existingLines.map((line) => line.line).join(', ')} total ${existingAmount}, but this LCM record ` +
-          `has only created ${ownedAmount} against this Bill for that Cost Category and LC Cost Item, so the lines are not provably its own`
-      );
-    }
-
     const mergedAmount = roundCurrency(existingAmount + (row.amount || 0));
     const mergedMemo = mergeVendorBillLineDescriptions(
       existingLines.map((line) => line.description),
@@ -1444,6 +1445,9 @@ define(
     setCurrentIfPresent(bill, 'item', 'rate', totalAmount);
     setCurrentIfPresent(bill, 'item', 'amount', totalAmount);
     setCurrentIfPresent(bill, 'item', 'description', description);
+    // Stamps the marker on a line that had none, so a repaired legacy line becomes provably
+    // owned and every later append can merge into it without asking the user anything.
+    setVendorBillLineSourceKey(bill, row);
     // Set last: NetSuite re-sources the line when rate or amount change, which can clear it.
     // An existing line that was never tagged is repaired here instead of being left untagged.
     if (!setVendorBillLineCostCategory(bill, row)) {
@@ -1478,9 +1482,20 @@ define(
     return roundCurrency((lines || []).reduce((total, line) => total + (toNumber(line.amount) || 0), 0));
   }
 
-  function findMatchingVendorBillCostLines(bill, row) {
+  // Ownership is decided by the line's own marker, never inferred. A line stamped with this
+  // row's source key is this LCM record's line for this merge group; a line stamped with any
+  // other key belongs to someone else and is skipped outright.
+  //
+  // A line with NO marker predates the marker, or was added by hand. Nothing can prove which,
+  // so it is invisible here unless the caller passes allowUnmarkedLines - which only the
+  // repair flow does, and only after the user has been shown the individual lines and has
+  // explicitly confirmed. That is attestation by the user, and it is deliberately not
+  // presented as proof.
+  function findMatchingVendorBillCostLines(bill, row, options) {
     const matches = [];
     const lineCount = getLineCount(bill, 'item');
+    const allowUnmarkedLines = Boolean(options && options.allowUnmarkedLines);
+    const sourceKey = buildVendorBillSourceKey(row);
     const billAllocationMethod = getVendorBillLandedCostMethodTextFromRecord(bill);
     const rowAllocationMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
 
@@ -1494,32 +1509,41 @@ define(
       const categoryText = getSublistText(bill, 'item', 'landedcostcategory', line);
       const itemText = getSublistText(bill, 'item', 'item', line);
       const description = getSublistValue(bill, 'item', 'description', line);
+      const hasCategory = Boolean(normalizeValue(category).trim() || normalizeChoice(categoryText));
+      const lineSourceKey = getVendorBillLineSourceKey(bill, line);
 
-      // The item is compared first and strictly. It is the one identity a saved Vendor Bill
-      // line always carries as an internal ID, so an ID-first comparison cannot be defeated
-      // by sourced or parent-prefixed display text the way a text-first comparison can.
+      if (lineSourceKey) {
+        if (!sourceKey || lineSourceKey !== sourceKey) continue;
+        matches.push({
+          line,
+          amount: getSublistValue(bill, 'item', 'amount', line),
+          description,
+          hasCategory,
+          marked: true,
+          reason: 'marker',
+        });
+        continue;
+      }
+
+      if (!allowUnmarkedLines) continue;
+
+      // Unmarked. Fall back to identity comparison purely to shortlist plausible candidates
+      // for the user to confirm - the item strictly, because it is the one identity a saved
+      // line always carries as an internal ID.
       const itemResult = compareCostIdentity(item, itemText, row.billItem, row.billItemText);
       if (itemResult !== 'match') continue;
 
-      const hasCategory = Boolean(normalizeValue(category).trim() || normalizeChoice(categoryText));
       const categoryResult = compareCostIdentity(category, categoryText, row.costCategory, row.costCategoryText);
       if (categoryResult === 'mismatch') continue;
-
-      let reason = categoryResult;
-      if (categoryResult !== 'match') {
-        // The line exposes no comparable Cost Category. Absorb it only when it still looks
-        // like a line this tool generated; writeVendorBillCostLine then re-stamps the
-        // category on it. Anything else on the Bill is left untouched.
-        if (hasCategory || !isGeneratedCostLineDescription(description, row)) continue;
-        reason = 'untagged';
-      }
+      if (categoryResult !== 'match' && (hasCategory || !isGeneratedCostLineDescription(description, row))) continue;
 
       matches.push({
         line,
         amount: getSublistValue(bill, 'item', 'amount', line),
         description,
         hasCategory,
-        reason,
+        marked: false,
+        reason: categoryResult === 'match' ? 'unmarked' : 'unmarked/untagged',
       });
     }
 
@@ -1576,10 +1600,27 @@ define(
     setCurrentIfPresent(bill, 'item', 'amount', row.amount);
     setCurrentIfPresent(bill, 'item', 'description', row.memo || row.costCategoryText);
     setClassifications(bill, 'item', row);
+    setVendorBillLineSourceKey(bill, row);
     // Set last: NetSuite re-sources the line when item/rate change, which can clear it.
-    const taggedAsCost = setVendorBillLineCostCategory(bill, row);
+    if (!setVendorBillLineCostCategory(bill, row)) {
+      // An untagged cost line is not a partial success. It cannot be picked up later as a
+      // landed cost source, so committing it would save a Bill that looks right, mark the
+      // source rows Created, and quietly deliver nothing. Fail instead, before the save.
+      cancelCurrentLine(bill);
+      throw new Error(describeUntaggedCostLine(row));
+    }
     bill.commitLine({ sublistId: 'item' });
-    return taggedAsCost;
+    return true;
+  }
+
+  function describeUntaggedCostLine(row) {
+    return (
+      `Landed Cost row ${row.id}: the Vendor Bill item line could not be tagged with Cost Category ` +
+      `"${row.costCategoryText || row.costCategory}". No Vendor Bill was saved. All three must hold: ` +
+      'the Landed Cost feature is enabled at Setup > Company > Enable Features > Items & Inventory; ' +
+      `the Cost Category is of type Landed Cost; and LC Cost Item ${row.billItemText || row.billItem} is a ` +
+      'non-inventory, service, or other-charge item rather than an inventory item.'
+    );
   }
 
   function setVendorBillLineCostCategory(bill, row) {

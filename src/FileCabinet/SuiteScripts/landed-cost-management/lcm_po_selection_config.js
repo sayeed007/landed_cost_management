@@ -108,6 +108,12 @@ define([], () => {
       billType: 'custbody12',
       landedCostMethod: 'landedcostmethod',
     },
+    vendorBillLine: {
+      // Ownership marker stamped on every landed-cost line this tool generates, so a later
+      // append or repair can tell its own lines apart from anything else on the Bill.
+      // Deployed as src/Objects/custcol_lcm_source_key.xml.
+      sourceKey: 'custcol_lcm_source_key',
+    },
   };
 
   const ACCOUNT_CONSTANTS = {

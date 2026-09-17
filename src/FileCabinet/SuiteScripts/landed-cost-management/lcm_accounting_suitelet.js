@@ -155,14 +155,20 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
 
   function renderBillRepairPreview(context) {
     const parentId = context.request.parameters.parentId || '';
-    const preview = accounting.buildVendorBillRepairPreview(parentId);
+    const includeLegacyLines = context.request.parameters.legacy === 'T';
+    const preview = accounting.buildVendorBillRepairPreview(parentId, { includeLegacyLines });
     const form = serverWidget.createForm({ title: 'LCM Repair Vendor Bill Lines' });
 
     addHidden(form, 'custpage_parent_id', parentId);
     addHidden(form, 'custpage_action', 'repairVendorBills');
-    addHtml(form, renderBillRepairPreviewHtml(preview));
+    addHidden(form, 'custpage_include_legacy', includeLegacyLines ? 'T' : 'F');
+    addHtml(form, renderBillRepairPreviewHtml(preview, legacyPreviewUrl(parentId)));
     if (preview.ok) {
-      form.addSubmitButton({ label: 'Confirm Repair Vendor Bill Lines' });
+      form.addSubmitButton({
+        label: includeLegacyLines
+          ? 'Confirm Repair Including Unmarked Lines'
+          : 'Confirm Repair Vendor Bill Lines',
+      });
     }
 
     context.response.writePage(form);
@@ -170,27 +176,77 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
 
   function renderBillRepairResult(context) {
     const parentId = context.request.parameters.custpage_parent_id || '';
-    const result = accounting.repairCreatedVendorBillLines(parentId);
+    const includeLegacyLines = context.request.parameters.custpage_include_legacy === 'T';
+    const result = accounting.repairCreatedVendorBillLines(parentId, { includeLegacyLines });
     const form = serverWidget.createForm({ title: 'LCM Vendor Bill Lines Repaired' });
     addHtml(form, renderBillRepairResultHtml(result, parentRecordUrl(parentId)));
     context.response.writePage(form);
   }
 
-  function renderBillRepairPreviewHtml(preview) {
+  function legacyPreviewUrl(parentId) {
+    try {
+      return url.resolveScript({
+        scriptId: config.SCRIPTS.accountingSuitelet.scriptId,
+        deploymentId: config.SCRIPTS.accountingSuitelet.deploymentId,
+        params: { parentId, action: 'billRepairPreview', legacy: 'T' },
+      });
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function renderBillRepairPreviewHtml(preview, legacyUrl) {
     return `
       ${sharedStyles()}
       <div class="lcm-box">
-        <h3>Preview Vendor Bill Line Repair</h3>
+        <h3>Preview Vendor Bill Line Repair${preview.includeLegacyLines ? ' (including unmarked lines)' : ''}</h3>
         <p>Created Vendor Bills: ${preview.bills.length}. Bills needing repair: ${
           preview.bills.filter((plan) => plan.needsRepair).length
         }.</p>
         ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
         ${renderBillRepairPlans(preview.bills)}
-        <p class="lcm-muted">This action only consolidates cost lines it can prove this LCM record created: the matched Bill lines must total exactly what this record's Landed Cost rows created for that LC Cost Category and LC Cost Item. Anything that does not reconcile is reported above and left untouched.</p>
-        <p class="lcm-muted">It keeps each Vendor Bill total unchanged, does not add or remove amounts, does not touch any other line, and does not change the Landed Cost rows or their allocation. A group whose consolidated line cannot be tagged with its Cost Category is skipped rather than collapsed.</p>
+        ${renderLegacyLines(preview)}
+        <p class="lcm-muted">Every line this tool generates carries a hidden <strong>LCM Source Key</strong> naming the LCM record and the merge group it belongs to. That marker is what makes a line safe to rewrite or remove, so by default only marked lines are consolidated. Lines belonging to another LCM record, and lines nobody marked, are never touched.</p>
+        <p class="lcm-muted">Each Vendor Bill total is unchanged: the surviving line carries the sum of the lines it replaces. No other line is touched, and the Landed Cost rows and their allocation do not change. A group whose consolidated line cannot be tagged with its Cost Category is skipped rather than collapsed.</p>
+        ${renderLegacyInvitation(preview, legacyUrl)}
         <p class="lcm-muted">Close this window without confirming if the preview is not correct.</p>
       </div>
     `;
+  }
+
+  // Unmarked lines predate the marker or were added by hand, and nothing in the data can tell
+  // those two apart. They are therefore listed individually and merged only on the user's say-so.
+  function renderLegacyLines(preview) {
+    if (!preview.includeLegacyLines) return '';
+    const rows = preview.bills
+      .reduce(
+        (all, plan) => all.concat(plan.legacyLines.map((line) => Object.assign({ bill: plan.transactionNumber }, line))),
+        []
+      )
+      .map(
+        (line) => `<tr>
+          <td>${escapeHtml(line.bill)}</td>
+          <td>${line.line}</td>
+          <td>${escapeHtml(line.costCategoryText)}</td>
+          <td>${escapeHtml(line.billItemText)}</td>
+          <td>${escapeHtml(String(line.amount))}</td>
+          <td>${escapeHtml(line.description || '')}</td>
+        </tr>`
+      )
+      .join('');
+    if (!rows) return '<h4>Unmarked lines</h4><p class="lcm-muted">None found.</p>';
+    return `
+      <h4 class="lcm-error">Unmarked lines that would be merged and removed</h4>
+      <p class="lcm-error">These lines carry no LCM Source Key, so this tool cannot prove it created them. They either predate the marker or were added to the Bill by hand. Read every row below before confirming: anything listed here that you recognise as a manual entry will be merged into one line and the extra lines deleted.</p>
+      <table class="lcm-table"><thead><tr><th>Bill</th><th>Line</th><th>LC Cost Category</th><th>LC Cost Item</th><th>Amount</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>
+    `;
+  }
+
+  function renderLegacyInvitation(preview, legacyUrl) {
+    if (preview.includeLegacyLines || !legacyUrl) return '';
+    return `<p class="lcm-muted">Repairing a Vendor Bill generated before the LCM Source Key existed needs its unmarked lines included. <a href="${escapeHtml(
+      legacyUrl
+    )}">Preview the repair including unmarked lines</a> - every such line is listed individually there for you to check before anything is changed.</p>`;
   }
 
   function renderBillRepairPlans(bills) {
@@ -205,7 +261,8 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
           <td>${plan.targetLineCount}</td>
           <td>${plan.duplicateLineCount}</td>
           <td>${plan.untaggedLineCount}</td>
-          <td>${plan.needsRepair ? 'Consolidate duplicate cost lines' : 'Already consolidated'}</td>
+          <td>${plan.legacyLineCount}</td>
+          <td>${plan.needsRepair ? 'Consolidate duplicate cost lines' : 'Nothing to consolidate'}</td>
         </tr>`
       )
       .join('');
@@ -213,9 +270,9 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
       .reduce((all, plan) => all.concat(plan.blockedGroups.map((text) => `${plan.transactionNumber}: ${text}`)), [])
       .map((text) => `<li>${escapeHtml(text)}</li>`)
       .join('');
-    return `<table class="lcm-table"><thead><tr><th>Bill</th><th>Vendor</th><th>Currency</th><th>LCM Rows</th><th>Target Lines</th><th>Duplicate Lines</th><th>Untagged Lines</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
+    return `<table class="lcm-table"><thead><tr><th>Bill</th><th>Vendor</th><th>Currency</th><th>LCM Rows</th><th>Target Lines</th><th>Duplicate Lines</th><th>Untagged Lines</th><th>Unmarked Lines</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
       blocked
-        ? `<h4>Not repairable - left untouched</h4><p class="lcm-muted">These Bill lines do not reconcile with what this LCM record created, so at least one of them came from somewhere else. They are reported rather than changed.</p><ul>${blocked}</ul>`
+        ? `<h4>Not repairable - left untouched</h4><ul>${blocked}</ul>`
         : ''
     }`;
   }
@@ -238,7 +295,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
       ${sharedStyles()}
       <div class="lcm-box">
         <h3>Vendor Bill line repair complete</h3>
-        <p>Vendor Bills repaired: ${result.created.length}. Duplicate lines removed: ${result.removedLineCount}. Vendor Bill totals and Landed Cost rows are unchanged.</p>
+        <p>Vendor Bills repaired: ${result.created.length}. Duplicate lines removed: ${result.removedLineCount}.${result.includeLegacyLines ? ' Unmarked lines were included at your confirmation.' : ''} Vendor Bill totals and Landed Cost rows are unchanged. Every surviving line now carries the LCM Source Key, so later appends can merge into it without asking again.</p>
         ${transactionTable}
         ${backUrl ? `<p><a href="${escapeHtml(backUrl)}">Back to Landed Cost Management</a></p>` : ''}
       </div>

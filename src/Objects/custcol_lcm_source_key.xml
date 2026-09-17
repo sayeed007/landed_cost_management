@@ -1,0 +1,25 @@
+<transactioncolumncustomfield scriptid="custcol_lcm_source_key">
+  <accesslevel>2</accesslevel>
+  <applyformatting>F</applyformatting>
+  <colexpense>F</colexpense>
+  <colpurchase>T</colpurchase>
+  <colsale>F</colsale>
+  <defaultchecked>F</defaultchecked>
+  <defaultvalue></defaultvalue>
+  <description>Ownership marker written by Landed Cost Management onto the Vendor Bill lines it generates. Format: LCM&lt;record id&gt;::&lt;merge key&gt;. It is what proves a line was created by a given LCM record, so appending and repairing can rewrite or remove only their own lines. Do not edit or clear it by hand.</description>
+  <displaytype>HIDDEN</displaytype>
+  <dynamicdefault></dynamicdefault>
+  <encryptatrest>F</encryptatrest>
+  <fieldtype>TEXT</fieldtype>
+  <help>Set automatically by the Landed Cost Management scripts. A blank value on a landed-cost line means the line predates this marker, or was not created by Landed Cost Management.</help>
+  <isformula>F</isformula>
+  <ismandatory>F</ismandatory>
+  <label>LCM Source Key</label>
+  <linktext></linktext>
+  <maxlength>300</maxlength>
+  <searchlevel>2</searchlevel>
+  <showhierarchy>F</showhierarchy>
+  <sourcefrom></sourcefrom>
+  <sourcelist></sourcelist>
+  <storevalue>T</storevalue>
+</transactioncolumncustomfield>
