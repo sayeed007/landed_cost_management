@@ -186,7 +186,8 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         }.</p>
         ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
         ${renderBillRepairPlans(preview.bills)}
-        <p class="lcm-muted">This action only consolidates duplicate generated cost lines that belong to this LCM record, and re-tags a generated line whose Cost Category is missing. It keeps each Vendor Bill total unchanged, does not add or remove amounts, does not touch any other line, and does not change the Landed Cost rows or their allocation.</p>
+        <p class="lcm-muted">This action only consolidates cost lines it can prove this LCM record created: the matched Bill lines must total exactly what this record's Landed Cost rows created for that LC Cost Category and LC Cost Item. Anything that does not reconcile is reported above and left untouched.</p>
+        <p class="lcm-muted">It keeps each Vendor Bill total unchanged, does not add or remove amounts, does not touch any other line, and does not change the Landed Cost rows or their allocation. A group whose consolidated line cannot be tagged with its Cost Category is skipped rather than collapsed.</p>
         <p class="lcm-muted">Close this window without confirming if the preview is not correct.</p>
       </div>
     `;
@@ -208,12 +209,14 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         </tr>`
       )
       .join('');
-    const warnings = bills
-      .reduce((all, plan) => all.concat(plan.amountWarnings.map((text) => `${plan.transactionNumber}: ${text}`)), [])
+    const blocked = bills
+      .reduce((all, plan) => all.concat(plan.blockedGroups.map((text) => `${plan.transactionNumber}: ${text}`)), [])
       .map((text) => `<li>${escapeHtml(text)}</li>`)
       .join('');
     return `<table class="lcm-table"><thead><tr><th>Bill</th><th>Vendor</th><th>Currency</th><th>LCM Rows</th><th>Target Lines</th><th>Duplicate Lines</th><th>Untagged Lines</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
-      warnings ? `<h4>Amount notes</h4><ul>${warnings}</ul>` : ''
+      blocked
+        ? `<h4>Not repairable - left untouched</h4><p class="lcm-muted">These Bill lines do not reconcile with what this LCM record created, so at least one of them came from somewhere else. They are reported rather than changed.</p><ul>${blocked}</ul>`
+        : ''
     }`;
   }
 

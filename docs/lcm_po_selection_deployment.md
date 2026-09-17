@@ -187,6 +187,10 @@ On Create Bill:
 - Build the merge identity from internal IDs first, falling back to normalized display text only for a value that has no internal ID. Rehydrate the hidden native Cost Category and LC Cost Item from the selected mapping record before validating the row and before building the key, so stale or blank hidden values cannot split equivalent lines. Never decide a merge on display text alone.
 - When appending to an existing generated Vendor Bill, match existing cost lines by the same ID-first identity - item strictly, then category - consolidate them into one line, and re-stamp the Cost Category after writing rate and amount.
 - Do not merge different LC Cost Categories, different LC Cost Items, or different Allocation Methods.
+- Refuse a Vendor Bill group whose Landed Cost rows disagree about the Allocation Method. `Cost Allocation Method` is a Vendor Bill body field, so one Bill can only carry one; separate lines would still all be allocated by whichever method reached the header. Report both methods and the rows asking for each, and leave grouping by vendor/subsidiary/currency unchanged.
+- Refuse a Landed Cost row whose LC Cost Category mapping does not resolve to a Cost Category and an active LC Cost Item. Never fall back to the hidden native values that mapping was supposed to derive.
+- Before rewriting or deleting any existing Bill line, prove the LCM record owns it: the matched lines must total exactly what this record's Landed Cost rows have created against that Bill for that category and item. If they do not, add a new line instead of touching them.
+- Abandon a consolidation whose surviving line cannot be tagged with its Cost Category, checking before the commit so the Bill is never left inflated or collapsed into an untagged line.
 - `Recalculate Landed Cost` remains an allocation repair action and does not rewrite an already-created Vendor Bill. `Repair Vendor Bill Lines` is the only path that edits one, and only on explicit confirmation.
 - Use one merged item line with quantity `1`, summed amount as rate/amount, mapped LC Cost Item, shared LC Cost Category, and distinct row memos joined as the description.
 - Keep all original Landed Cost rows separate on the LCM record and mark each source row `Created` with the same generated Bill reference.
@@ -196,10 +200,11 @@ On Create Bill:
 On Repair Vendor Bill Lines:
 
 - Explicit, opt-in, preview-then-confirm. No automatic flow rewrites an already-created Vendor Bill.
-- Consolidate duplicate generated cost lines belonging to this LCM record into one line per merge identity, with quantity `1` and the distinct descriptions merged.
-- Re-tag a generated cost line whose `Landed Cost Category` is missing.
-- Keep every Vendor Bill total unchanged: the surviving line carries the sum of the lines it replaces, not the Landed Cost row total. Report any difference between the two as a note in the preview instead of writing it.
-- Do not touch lines that are not generated cost lines for this LCM record, do not change Landed Cost rows, and do not re-run allocation.
+- Consolidate duplicate cost lines into one line per merge identity, with quantity `1` and the distinct descriptions merged.
+- Re-tag a cost line whose `Landed Cost Category` is missing.
+- Only touch lines the LCM record can prove it created. Where the Bill lines do not reconcile with the Landed Cost rows, report the group as not repairable and change nothing. Re-check ownership against the reloaded record at confirmation time rather than trusting the preview.
+- Keep every Vendor Bill total unchanged: the surviving line carries the sum of the lines it replaces, not the Landed Cost row total.
+- Do not touch lines this LCM record did not create, do not change Landed Cost rows, and do not re-run allocation. Do not save a Bill that ends up with nothing to repair.
 
 On Recalculate Landed Cost:
 
