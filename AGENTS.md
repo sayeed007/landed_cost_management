@@ -26,7 +26,7 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 
 - Header `custrecord_lcm_vendor` is the Purchase Order Vendor used to filter and validate selected POs.
 - Header `custrecord_lcm_selected_pos` is the stored selected PO list; users should populate it through the `Select Receivable POs` Suitelet so fully received/non-receivable POs are not selectable in normal UX.
-- Header `custrecord_lcm_shipment_status` is dynamic: `To Be Shipped` before any Landed Cost row exists, `In Transit` while Bill rows are pending GRN allocation, `Partially Received` after allocation when any Items row is partial, and `Received` after allocation when all Items rows are full.
+- Header `custrecord_lcm_shipment_status` is dynamic: `To Be Shipped` before any Landed Cost row exists; `In Transit` until every created Bill row is allocated and every positive-quantity LCM Item links to an Item Receipt; then `Partially Received` or `Received` from the Items tab Receive Status values.
 - Root record shipment numbering should use NetSuite custom record auto-numbering; the old text field `custrecord_lcm_shipment_number` is legacy compatibility only.
 - `LCM Items` should include only PO item lines that are receivable and still have remaining quantity to receive.
 - `Expected Quantity Receipt` means PO quantity still open for receipt.
@@ -60,8 +60,11 @@ This repository is the NetSuite SuiteCloud/SDF project for Landed Cost Managemen
 - Landed Cost `Currency` and `Exchange Rate` are editable; changing currency should refresh the exchange rate from a sourced Vendor Bill context.
 - Landed Cost `Effective Date` is mandatory and defaults to today's date.
 - Landed Cost `Location` defaults from the first selected PO location when available.
-- Landed Cost `Cost Allocated In GRN` is checked only after item-level landed-cost allocation succeeds; created-but-unallocated Bill rows can be repaired through `Recalculate Landed Cost`.
-- `Recalculate Landed Cost` must not create or append Vendor Bills. It recalculates item landed cost fresh from all created Bill-type Landed Cost rows and then marks those rows allocated.
+- `Create Item Receipt` is available on a saved LCM View record only after every Bill-type Landed Cost row is Created. It transforms one native Item Receipt per PO, receives only positive-quantity LCM Item rows matched by PO Line Key, writes `custrecord_lcmitems_item_receipt`, and stamps `custbody_lcm_ir_source_key` (`LCM<root id>::PO<PO id>`) so reruns relink instead of double-receiving.
+- Once an LCM Item row is linked to an Item Receipt, its PO, item, PO Line Key, Quantity Receipt, Track Item, and Item Receipt reference are locked in both the LCM form and direct child-record saves. Derived cost values may still be refreshed by LCM allocation.
+- A Vendor Bill can be an `Other Transaction` landed-cost source on one Item Receipt only. When an LCM spans multiple POs, calculate each receipt's base-currency allocation from tracked items, convert it to the PO receipt currency, and write Manual native landed-cost amounts by category. Refuse mixed effective allocation methods across the created Bill rows rather than posting a native GRN that differs from LCM allocation.
+- Landed Cost `Cost Allocated In GRN` is checked only after every positive-quantity LCM Item is linked to its generated Item Receipt and item-level allocation succeeds. `Recalculate Landed Cost` refreshes values but never marks allocation before a GRN exists.
+- `Recalculate Landed Cost` must not create or append Vendor Bills. It recalculates item landed cost fresh from all created Bill-type Landed Cost rows. After a GRN exists, new Bill rows are blocked on the same LCM record; use a new LCM record for later charges.
 - `LC Cost Item`, `Department`, and `Class` are not user-facing in the landed-cost sublist.
 - Canonical Landed Cost fields are the current Vendor Name, Bill Type, mapped LC Cost Category, and LC Cost Item fields. The duplicate legacy Vendor Name, Deprecated Bill Type, Expense Account, Bill Item, Debit Account, and Credit Account fields are retired and must not be reintroduced. The hidden native Cost Category remains for Vendor Bill tagging and GRN allocation; the former Legacy LC Cost Category field is retired. Journal accounts are script-configured rather than stored on each Landed Cost row.
 

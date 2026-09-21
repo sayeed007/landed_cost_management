@@ -632,6 +632,25 @@ ${defaults.reason || ''}`
     window.open(suiteletUrl, '_blank');
   }
 
+  function openLcmItemReceiptPreview() {
+    const rec = currentRecord.get();
+    if (!rec.id) {
+      window.alert('Save the Landed Cost Management record before creating Item Receipts.');
+      return;
+    }
+
+    const suiteletUrl = url.resolveScript({
+      scriptId: SCRIPTS.accountingSuitelet.scriptId,
+      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
+      params: {
+        parentId: rec.id,
+        action: 'itemReceiptPreview',
+      },
+    });
+
+    window.open(suiteletUrl, '_blank');
+  }
+
 
   function openReceivablePoSelector() {
     exposeWindowCallbacks();
@@ -663,7 +682,7 @@ ${defaults.reason || ''}`
 
   function showPoSelectionLockedMessage() {
     window.alert(
-      'Selected Purchase Orders cannot be changed after any Landed Cost row has created a Bill or Journal Entry.'
+      'Selected Purchase Orders cannot be changed after LCM accounting or an Item Receipt has been created.'
     );
   }
 
@@ -954,6 +973,7 @@ ${defaults.reason || ''}`
     applyReceivablePoSelection,
     openLcmAccountingPreview,
     openLcmAllocationRecalculation,
+    openLcmItemReceiptPreview,
     selectAllLcmTrackItems,
   };
 });

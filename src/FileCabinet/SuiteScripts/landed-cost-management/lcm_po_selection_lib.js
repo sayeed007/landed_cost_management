@@ -346,6 +346,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           FIELDS.lcmItems.totalUnitCost,
           FIELDS.lcmItems.totalValue,
           FIELDS.lcmItems.poLineKey,
+          FIELDS.lcmItems.itemReceipt,
         ],
       })
       .run()
@@ -370,6 +371,8 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           totalUnitCost: toNumber(result.getValue({ name: FIELDS.lcmItems.totalUnitCost })),
           totalValue: toNumber(result.getValue({ name: FIELDS.lcmItems.totalValue })),
           poLineKey: String(result.getValue({ name: FIELDS.lcmItems.poLineKey }) || ''),
+          itemReceiptId: String(result.getValue({ name: FIELDS.lcmItems.itemReceipt }) || ''),
+          itemReceiptText: String(result.getText({ name: FIELDS.lcmItems.itemReceipt }) || ''),
         });
         return true;
       });
@@ -671,11 +674,34 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return found;
   }
 
+  function hasCreatedItemReceipts(parentId) {
+    if (!parentId) return false;
+
+    let found = false;
+    search
+      .create({
+        type: RECORDS.lcmItems,
+        filters: [
+          [FIELDS.lcmItems.parent, 'anyof', parentId],
+          'AND',
+          [FIELDS.lcmItems.itemReceipt, 'isnotempty', ''],
+        ],
+        columns: ['internalid'],
+      })
+      .run()
+      .each(() => {
+        found = true;
+        return false;
+      });
+    return found;
+  }
+
   return {
     normalizeIds,
     fetchPurchaseOrderItemLines,
     getVendorDefaults,
     hasCreatedAccountingRows,
+    hasCreatedItemReceipts,
     listReceivablePurchaseOrders,
     recalculatePersistedItemValues,
     syncPersistedItems,

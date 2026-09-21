@@ -1,0 +1,38 @@
+<transactionbodycustomfield scriptid="custbody_lcm_ir_source_key">
+  <accesslevel>2</accesslevel>
+  <applyformatting>F</applyformatting>
+  <bodyitemreceipt>T</bodyitemreceipt>
+  <checkspelling>F</checkspelling>
+  <defaultchecked>F</defaultchecked>
+  <defaultselection></defaultselection>
+  <defaultvalue></defaultvalue>
+  <description>Idempotency marker written by Landed Cost Management to a generated Item Receipt. Format: LCM&lt;record id&gt;::PO&lt;purchase order id&gt;.</description>
+  <displayheight></displayheight>
+  <displaytype>HIDDEN</displaytype>
+  <displaywidth></displaywidth>
+  <dynamicdefault></dynamicdefault>
+  <encryptatrest>F</encryptatrest>
+  <fieldtype>TEXT</fieldtype>
+  <globalsearch>F</globalsearch>
+  <help>Set automatically by Landed Cost Management. Do not edit or clear it.</help>
+  <isformula>F</isformula>
+  <ismandatory>F</ismandatory>
+  <isparent>F</isparent>
+  <label>LCM Item Receipt Source Key</label>
+  <linktext></linktext>
+  <maxlength>300</maxlength>
+  <maxvalue></maxvalue>
+  <minvalue></minvalue>
+  <onparentdelete></onparentdelete>
+  <parentsubtab></parentsubtab>
+  <searchcomparefield></searchcomparefield>
+  <searchdefault></searchdefault>
+  <searchlevel>2</searchlevel>
+  <showhierarchy>F</showhierarchy>
+  <showinlist>F</showinlist>
+  <sourcefilterby></sourcefilterby>
+  <sourcefrom></sourcefrom>
+  <sourcelist></sourcelist>
+  <storevalue>T</storevalue>
+  <subtab></subtab>
+</transactionbodycustomfield>

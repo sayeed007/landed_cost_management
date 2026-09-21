@@ -59,7 +59,14 @@ define(
       FIELDS.lcmItems.unitLandedCost,
       FIELDS.lcmItems.totalUnitCost,
       FIELDS.lcmItems.totalValue,
+      FIELDS.lcmItems.itemReceipt,
     ]);
+    if (hasCreatedItemReceipts(context)) {
+      disableSublistFields(context.form, SUBLISTS.lcmItems, [
+        FIELDS.lcmItems.quantityReceipt,
+        FIELDS.lcmItems.trackItem,
+      ]);
+    }
     disableSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       FIELDS.lcmLandedCosts.allocationMethod,
     ]);
@@ -99,6 +106,11 @@ define(
         label: 'Recalculate Landed Cost',
         functionName: 'openLcmAllocationRecalculation()',
       });
+      context.form.addButton({
+        id: 'custpage_lcm_create_item_receipt',
+        label: 'Create Item Receipt',
+        functionName: 'openLcmItemReceiptPreview()',
+      });
     }
   }
 
@@ -110,11 +122,11 @@ define(
     if (context.type === context.UserEventType.CREATE || context.type === context.UserEventType.COPY) return;
     if (!context.oldRecord || !context.newRecord.id) return;
     if (!shouldSyncPoItems(context)) return;
-    if (!lib.hasCreatedAccountingRows(context.newRecord.id)) return;
+    if (!lib.hasCreatedAccountingRows(context.newRecord.id) && !lib.hasCreatedItemReceipts(context.newRecord.id)) return;
 
     throw error.create({
       name: 'LCM_PO_CHANGE_BLOCKED',
-      message: 'Selected Purchase Orders cannot be changed after any Landed Cost row has created a Bill or Journal Entry.',
+      message: 'Selected Purchase Orders cannot be changed after LCM accounting or an Item Receipt has been created.',
       notifyOff: false,
     });
   }
@@ -284,10 +296,23 @@ define(
   function isPoSelectionLocked(context) {
     if (!context.newRecord.id) return false;
     try {
-      return lib.hasCreatedAccountingRows(context.newRecord.id);
+      return lib.hasCreatedAccountingRows(context.newRecord.id) || lib.hasCreatedItemReceipts(context.newRecord.id);
     } catch (error) {
       log.audit({
         title: 'LCM PO selector lock check failed',
+        details: error.message || error,
+      });
+      return false;
+    }
+  }
+
+  function hasCreatedItemReceipts(context) {
+    if (!context.newRecord.id) return false;
+    try {
+      return lib.hasCreatedItemReceipts(context.newRecord.id);
+    } catch (error) {
+      log.audit({
+        title: 'LCM Item Receipt lock check failed',
         details: error.message || error,
       });
       return false;

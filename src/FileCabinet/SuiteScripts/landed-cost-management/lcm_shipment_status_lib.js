@@ -48,9 +48,9 @@ define(['N/log', 'N/record', 'N/search', './lcm_po_selection_config'], (log, rec
     }
 
     const itemStatuses = fetchItemStatuses(parentId);
-    if (!itemStatuses.length) return SHIPMENT_STATUS.inTransit;
+    if (!itemStatuses.length || itemStatuses.some((item) => !item.itemReceiptId)) return SHIPMENT_STATUS.inTransit;
 
-    return itemStatuses.every((status) => normalizeChoice(status) === 'full')
+    return itemStatuses.every((item) => normalizeChoice(item.status) === 'full')
       ? SHIPMENT_STATUS.received
       : SHIPMENT_STATUS.partiallyReceived;
   }
@@ -86,11 +86,14 @@ define(['N/log', 'N/record', 'N/search', './lcm_po_selection_config'], (log, rec
       .create({
         type: RECORDS.lcmItems,
         filters: [[f.parent, 'anyof', parentId]],
-        columns: [f.billStatus],
+        columns: [f.billStatus, f.itemReceipt],
       })
       .run()
       .each((result) => {
-        statuses.push(getResultValue(result, f.billStatus));
+        statuses.push({
+          status: getResultValue(result, f.billStatus),
+          itemReceiptId: getResultValue(result, f.itemReceipt),
+        });
         return true;
       });
     return statuses;

@@ -37,6 +37,7 @@ define([], () => {
       totalValue: 'custrecord_lcmitems_total_value',
       exchangeRate: 'custrecord_lcmitems_exchange_rate',
       trackItem: 'custrecord_lcmitems_track_item',
+      itemReceipt: 'custrecord_lcmitems_item_receipt',
 
       // Create this hidden text field on LCM Items.
       poLineKey: 'custrecord_lcmitems_source_line_key',
@@ -113,6 +114,12 @@ define([], () => {
       // append can tell its own lines apart from anything else on the Bill.
       // Deployed as src/Objects/custcol_lcm_source_key.xml.
       sourceKey: 'custcol_lcm_source_key',
+    },
+    itemReceipt: {
+      // One deterministic marker per LCM/PO receipt. It allows a rerun to reconnect LCM
+      // items to a receipt saved before the child-row link could be persisted.
+      sourceKey: 'custbody_lcm_ir_source_key',
+      landedCostMethod: 'landedcostmethod',
     },
   };
 

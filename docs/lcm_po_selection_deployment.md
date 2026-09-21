@@ -76,6 +76,18 @@ Create these before deploying the scripts:
    - Type: `Free-Form Text`
    - Purpose: visible PO transaction currency text.
 
+10. Child field on `LCM Items`
+   - Label: `Item Receipt`
+   - ID: `custrecord_lcmitems_item_receipt`
+   - Type: `List/Record`, Transaction (`-30`)
+   - Purpose: script-managed generated GRN reference for the exact LCM item row.
+
+11. Transaction body field
+   - Label: `LCM Item Receipt Source Key`
+   - ID: `custbody_lcm_ir_source_key`
+   - Type: `Free-Form Text`, hidden, applies to Item Receipt only
+   - Purpose: idempotency marker `LCM<root id>::PO<PO id>` that lets a rerun relink a receipt rather than receive inventory twice.
+
 10. Child field on `Landed Cost`
    - Label: `Vendor Name`
    - ID: `custrecord_lcm_lcm_vendor`
@@ -199,7 +211,7 @@ On Create Bill:
 - `Recalculate Landed Cost` remains an allocation repair action and does not rewrite an already-created Vendor Bill. Appending compatible new rows is the only thing that edits one.
 - Use one merged item line with quantity `1`, summed amount as rate/amount, mapped LC Cost Item, shared LC Cost Category, and distinct row memos joined as the description.
 - Keep all original Landed Cost rows separate on the LCM record and mark each source row `Created` with the same generated Bill reference.
-- Mark `Cost Allocated In GRN` only after item-level allocation succeeds.
+- Calculate item values after Bill creation, but mark `Cost Allocated In GRN` only after every positive-quantity LCM Item is linked to a generated Item Receipt.
 - After confirmation, show a `Back to Landed Cost Management` link to return to the source LCM record.
 
 On Recalculate Landed Cost:
@@ -207,8 +219,18 @@ On Recalculate Landed Cost:
 - Do not create or append Vendor Bills.
 - Recalculate item landed cost fresh from all created Bill-type Landed Cost rows on the LCM record.
 - Update tracked `LCM Items` rows with recalculated `Unit Landed Cost`, `Total Unit Cost`, and `Total Value`.
-- Mark all created Bill-type Landed Cost rows as `Cost Allocated In GRN` only after item-level allocation succeeds.
+- Do not mark `Cost Allocated In GRN` before a generated Item Receipt exists.
 - Use this to repair created-but-unallocated rows when a prior create attempt partially failed and there are no new Bills to create.
+
+On Create Item Receipt:
+
+- Require every Bill-type Landed Cost row to be Created before receipt confirmation.
+- Transform one Item Receipt from each selected PO and receive only the positive-quantity LCM Items matched by PO Line Key.
+- Stamp each Item Receipt with `custbody_lcm_ir_source_key`, then link each LCM Item through `custrecord_lcmitems_item_receipt`.
+- Calculate the PO-specific landed-cost share in base currency from tracked items, convert it to the PO receipt currency, and write it as Manual landed cost by category. Do not source the Vendor Bill as Other Transaction when one Bill spans multiple Item Receipts; NetSuite permits that source on one receipt only.
+- Reject mixed effective allocation methods across the created Bill rows.
+- After a receipt is linked, reject direct LCM Item changes to PO, item, PO Line Key, Quantity Receipt, Track Item, or the Item Receipt reference; derived cost fields remain script-managed.
+- After all links are written, refresh item values, mark created Bill rows `Cost Allocated In GRN`, write GRN number(s), and refresh Shipment Status.
 
 On save:
 

@@ -1,6 +1,6 @@
 # Landed Cost Management - Record Reference
 
-Last updated: 2026-09-17
+Last updated: 2026-09-21
 
 This document is the working record and field reference for the Landed Cost Management customization. It captures the current NetSuite custom records, field usage, and parent-child relationships. For implemented behavior and requirement chunks, see [lcm_implemented_requirements.md](./lcm_implemented_requirements.md).
 
@@ -23,7 +23,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Purchase Order Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor used only for selected PO filtering and validation. Landed Cost row `Vendor Name` drives generated Vendor Bills. |
 | Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
 | Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which only lists POs that have at least one receivable open item line for the selected Purchase Order Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
-| Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Dynamic shipment state: `To Be Shipped` before any Landed Cost row exists, `In Transit` after a row exists but before all Bill rows are allocated, `Partially Received` after allocation when any item row is partial, and `Received` when all item rows are full. |
+| Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Dynamic shipment state: `To Be Shipped` before any Landed Cost row exists; `In Transit` until every Bill row is allocated and every positive-quantity LCM Item is linked to a generated Item Receipt; then `Partially Received` or `Received` from the Items tab Receive Status values. |
 | Shipment Number | `custrecord_lcm_shipment_number` | Text | Legacy hidden shipment number text field. Shipment numbering now uses the custom record auto-number/name with `SHIP-` prefix and 5 minimum digits. |
 | Shipment Date | `custrecord_lcm_shipment_date` | Date | Shipment date for the landed cost record. |
 | LC Loan Number | `custrecord_lcm_lc_laon_number` | Text | LC loan number. Existing spelling in NetSuite is `laon`. |
@@ -56,7 +56,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | SDF object | `src/Objects/customrecord_lcmitems.xml` |
 | Parent link | `custrecord_lcm_lcm_hidden_lcm_item` |
 | Parent subtab | `Items` tab on Landed Cost Management |
-| Purpose | Generated item-level rows from selected receivable Purchase Order item lines that still have quantity open to receive. These rows provide the item, PO, editable receipt quantity, rate, values, and tracking context for later landed-cost work. |
+| Purpose | Generated item-level rows from selected receivable Purchase Order item lines that still have quantity open to receive. These rows provide the item, PO, editable receipt quantity, rate, landed-cost allocation context, and the generated Item Receipt (GRN) audit link. |
 
 ### LCM Items Field Reference
 
@@ -79,8 +79,9 @@ This document is the working record and field reference for the Landed Cost Mana
 | Unit Landed Cost | `custrecord_lcmitems_unit_landed_cost` | Currency | Result field for Bill landed-cost allocation per unit. Journal Entry amounts are not included in this calculation. |
 | Total Unit Cost | `custrecord_lcmitems_total_unit_cost` | Currency | Result field for converted PO rate plus Bill allocated landed cost per unit. Journal Entry amounts are not included in this calculation. |
 | Total Value | `custrecord_lcmitems_total_value` | Currency | Total Unit Cost multiplied by editable Quantity Receipt. Stored in base currency. |
+| Item Receipt | `custrecord_lcmitems_item_receipt` | Select, Transaction (`-30`) | Script-managed reference to the Item Receipt/GRN transformed from this row's Purchase Order. It prevents duplicate receiving and is locked after creation. |
 | Hidden LCM Item | `custrecord_lcm_lcm_hidden_lcm_item` | Parent select to `customrecord_landed_cost_management` | Parent-child link back to the root Landed Cost Management record. This creates the `Items` child sublist. |
-| PO Line Key | `custrecord_lcmitems_source_line_key` | Hidden text | Internal generated key from PO ID and PO line unique key. Used as a persisted trace/debug key. Current UI refresh clears and rebuilds lines, so it is not used as the primary duplicate prevention mechanism. |
+| PO Line Key | `custrecord_lcmitems_source_line_key` | Hidden text | Internal generated key from PO ID and PO line unique key. It reconciles persisted LCM item rows and precisely matches the source PO line when its Item Receipt is transformed. |
 
 ## 3. Child Custom Record: Landed Cost
 
@@ -121,13 +122,26 @@ This document is the working record and field reference for the Landed Cost Mana
 | Created Transaction | `custrecord_lcm_lcm_created_tran_ref` | Select, Transaction (`-30`) | Visible transaction reference to the generated Vendor Bill or Journal Entry. |
 | Created Transaction Type | `custrecord_lcm_lcm_created_tran_type` | Text | Generated transaction type label, such as Vendor Bill or Journal Entry. |
 | Created Date | `custrecord_lcm_lcm_created_date` | Date | Defaults to today when the Landed Cost row is saved; updated when accounting transaction is created. |
-| Cost Allocated In GRN | `custrecord_lcm_lcm_cost_allocation_grn` | Checkbox | Indicates whether the created cost has been allocated to tracked item rows. Checked only after item-level allocation succeeds; created-but-unallocated Bill rows can be repaired with `Recalculate Landed Cost`. |
+| Cost Allocated In GRN | `custrecord_lcm_lcm_cost_allocation_grn` | Checkbox | Indicates whether the created Bill cost has been allocated to the generated GRN(s). It is checked only after every positive-quantity LCM Item is linked to an Item Receipt and the item-level allocation succeeds. `Recalculate Landed Cost` refreshes the item values but does not mark a cost allocated before a GRN exists. |
+| GRN Number | `custrecord_lcm_lcm_grn_number` | Text | Script-managed comma-separated Item Receipt number(s) created for the LCM record. |
 
 Field lifecycle: `Vendor Name` (`custrecord_lcm_lcm_vendor`), `Bill Type` (`custrecord_lcm_lcm_cost_bill_type`), and `LC Cost Item` (`custrecord_lcm_lcm_cost_item`) are the canonical fields used by the current workflow. The duplicate legacy Vendor Name, Deprecated Bill Type, Expense Account, Bill Item, Debit Account, and Credit Account fields are retired and must not be reintroduced. Hidden native `Cost Category` (`custrecord_lcm_lcm_cost_category`) remains for Vendor Bill tagging and GRN allocation; `Legacy LC Cost Category` (`custrecord_lcm_lcm_cost_profile`) is retired. Journal accounts are script-configured rather than stored on each Landed Cost row.
-| GRN Number | `custrecord_lcm_lcm_grn_number` | Text | GRN reference number. |
 | Hidden Landed Cost | `custrecord_lcm_lcm_hidden_landed_cost` | Parent select to `customrecord_landed_cost_management` | Parent-child link back to the root Landed Cost Management record. This creates the `Landed Cost` child sublist. |
 
-## 4. Mapping Custom Record: LCM Cost Category Item Map
+## 4. Item Receipt (GRN) Creation
+
+`Create Item Receipt` is available from a saved Landed Cost Management record in View mode. It opens the existing LCM accounting Suitelet with a preview before any transaction is saved.
+
+1. All Bill-type Landed Cost rows must already be `Created`. New landed-cost Bills are intentionally blocked once an Item Receipt exists on the LCM record; use a new LCM record for later charges.
+2. The Suitelet groups positive `Quantity Receipt` LCM Items by Purchase Order and transforms one NetSuite `Item Receipt` from each PO. Only the exact source PO lines represented by LCM Items are received, with their configured quantities.
+3. The transformed Item Receipt is stamped with `custbody_lcm_ir_source_key` (`LCM<root id>::PO<PO id>`). If the transaction is saved but the LCM Item reference write fails, the next run finds this marker and relinks the rows instead of receiving inventory twice.
+4. Generated landed-cost Bills can be selected as an `Other Transaction` source on only one Item Receipt in NetSuite. Because one LCM can span multiple POs, this flow calculates each receipt's share in base currency using the existing tracked-item allocation, converts it into that PO's receipt currency, and writes the category values as `Manual` landed cost on the Item Receipt.
+5. All created Bill rows must have one effective allocation method (`Value`, `Quantity`, or `Weight`) for a native Item Receipt posting. The preview rejects mixed methods instead of posting a different native allocation from the LCM item calculation.
+6. After every positive-quantity LCM Item is linked to an Item Receipt, the flow refreshes `Unit Landed Cost`, `Total Unit Cost`, and `Total Value`, marks Bill rows `Cost Allocated In GRN`, writes the GRN number(s), and recalculates Shipment Status. Receipt-defining LCM Item fields (PO, item, PO Line Key, Quantity Receipt, Track Item, and Item Receipt reference) are then locked in both the parent form and direct child-record saves.
+
+The Item Receipt marker is a hidden transaction body field deployed by `src/Objects/custbody_lcm_ir_source_key.xml`; it applies to Item Receipts only and must remain deployed for rerun safety.
+
+## 5. Mapping Custom Record: LCM Cost Category Item Map
 
 | Property | Value |
 | --- | --- |
@@ -151,7 +165,7 @@ Mapping behavior:
 - The mapping User Event also names each mapping record from the selected LC Cost Category so the Landed Cost dropdown displays the category text.
 - Inactivating a mapping row removes it from the user-facing Landed Cost options.
 
-## 5. Related Documents
+## 6. Related Documents
 
 - [Implemented requirements](./lcm_implemented_requirements.md)
 - [PO selection deployment notes](./lcm_po_selection_deployment.md)

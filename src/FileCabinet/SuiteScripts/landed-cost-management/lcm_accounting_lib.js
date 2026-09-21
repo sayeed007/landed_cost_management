@@ -110,6 +110,12 @@ define(
       preview.errors.push('At least one LCM Item row must have Track Item checked before creating accounting.');
     }
 
+    if (mode === MODES.bill && preview.eligibleRows.length && hasCreatedItemReceipts(preview.parentId)) {
+      preview.errors.push(
+        'This LCM record already has an Item Receipt. Create a new LCM record for additional landed-cost Bills so the GRN allocation remains auditable.'
+      );
+    }
+
     preview.groups = groupRows(preview.eligibleRows, mode, createdRows);
     if (mode === MODES.bill) {
       findAllocationMethodConflicts(preview.groups).forEach((conflict) => preview.errors.push(conflict));
@@ -168,9 +174,9 @@ define(
     if (preview.mode === MODES.bill) {
       const rowsForAllocation = getCreatedBillRows(parentId);
       allocateCreatedCosts(parentId, rowsForAllocation, { reset: true });
-      markCostRowsAllocated(rowsForAllocation);
+      const finalized = finalizeCostAllocationAfterReceipts(parentId, rowsForAllocation);
       shipmentStatus.recalculate(parentId);
-      allocatedRowCount = rowsForAllocation.length;
+      allocatedRowCount = finalized.allocatedRowCount;
     }
 
     return {
@@ -241,7 +247,7 @@ define(
     }
 
     allocateCreatedCosts(parentId, preview.createdBillRows, { reset: true });
-    markCostRowsAllocated(preview.createdBillRows);
+    const finalized = finalizeCostAllocationAfterReceipts(parentId, preview.createdBillRows);
     shipmentStatus.recalculate(parentId);
 
     return {
@@ -249,9 +255,186 @@ define(
       modeText: preview.modeText,
       created: [],
       processedRowCount: 0,
-      allocatedRowCount: preview.createdBillRows.length,
+      allocatedRowCount: finalized.allocatedRowCount,
       pendingAllocatedRowCount: preview.unallocatedCreatedRows.length,
       skippedRows: [],
+      allocationTargetCount: preview.allocationTargetCount,
+    };
+  }
+
+  function buildItemReceiptPreview(parentId) {
+    const preview = {
+      ok: false,
+      mode: 'itemReceipt',
+      modeText: 'Item Receipt',
+      parentId: String(parentId || ''),
+      allocationTargetCount: 0,
+      createdBillRows: [],
+      pendingBillRows: [],
+      receiptItems: [],
+      groups: [],
+      skippedRows: [],
+      errors: [],
+    };
+
+    if (!preview.parentId) {
+      preview.errors.push('Missing Landed Cost Management record ID.');
+      return preview;
+    }
+
+    assertParentAccessible(preview.parentId);
+    const billRows = fetchLandedCostRows(preview.parentId).filter((row) => row.targetMode === MODES.bill);
+    preview.createdBillRows = billRows.filter((row) => row.isCreated);
+    preview.pendingBillRows = billRows.filter((row) => !row.isCreated);
+    preview.receiptItems = fetchLcmReceiptItems(preview.parentId);
+    preview.allocationTargetCount = preview.receiptItems.filter((row) => row.trackItem).length;
+
+    if (!billRows.length) {
+      preview.errors.push('Add and create at least one Bill-type Landed Cost row before creating Item Receipts.');
+    }
+    if (preview.pendingBillRows.length) {
+      preview.errors.push(
+        `Create all Bill-type Landed Cost rows first. Pending rows: ${preview.pendingBillRows.map((row) => row.id).join(', ')}.`
+      );
+    }
+    if (!preview.receiptItems.length) {
+      preview.errors.push('No LCM Item row has a positive Quantity Receipt to receive.');
+    }
+    if (preview.createdBillRows.length && !preview.allocationTargetCount) {
+      preview.errors.push('At least one LCM Item row must have Track Item checked before creating Item Receipts with landed cost.');
+    }
+
+    const groupsByPo = {};
+    preview.receiptItems.forEach((row) => {
+      if (!row.purchaseOrderId || !row.itemId || !row.poLineKey) {
+        preview.errors.push(
+          `LCM Item ${row.id} is missing its PO, Item, or PO Line Key and cannot be transformed into an Item Receipt.`
+        );
+        return;
+      }
+      if (!groupsByPo[row.purchaseOrderId]) {
+        groupsByPo[row.purchaseOrderId] = {
+          key: row.purchaseOrderId,
+          purchaseOrderId: row.purchaseOrderId,
+          purchaseOrderText: row.purchaseOrderText || row.purchaseOrderId,
+          exchangeRate: row.exchangeRate || 1,
+          currencyText: row.poCurrencyText || '',
+          rows: [],
+          action: 'Create',
+          existingReceiptId: '',
+          existingReceiptNumber: '',
+          landedCosts: [],
+          baseLandedCostAmount: 0,
+        };
+      }
+      groupsByPo[row.purchaseOrderId].rows.push(row);
+    });
+
+    Object.keys(groupsByPo).forEach((poId) => {
+      const group = groupsByPo[poId];
+      const receiptIds = uniqueIds(group.rows.map((row) => row.itemReceiptId));
+      if (receiptIds.length > 1) {
+        preview.errors.push(`LCM Items for PO ${group.purchaseOrderText} point to more than one Item Receipt.`);
+      } else if (receiptIds.length === 1) {
+        group.existingReceiptId = receiptIds[0];
+        group.existingReceiptNumber =
+          group.rows.find((row) => row.itemReceiptId === receiptIds[0]).itemReceiptText || receiptIds[0];
+        group.action = 'Already received';
+      } else {
+        const existingReceipt = findGeneratedItemReceipt(preview.parentId, group.purchaseOrderId);
+        if (existingReceipt) {
+          group.existingReceiptId = existingReceipt.id;
+          group.existingReceiptNumber = existingReceipt.tranid || existingReceipt.id;
+          group.action = 'Relink existing receipt';
+        }
+      }
+    });
+
+    if (!preview.errors.length && preview.createdBillRows.length) {
+      const allocation = buildReceiptLandedCostAllocations(preview.receiptItems, preview.createdBillRows);
+      preview.errors.push(...allocation.errors);
+      if (!allocation.errors.length) {
+        Object.keys(groupsByPo).forEach((poId) => {
+          const group = groupsByPo[poId];
+          const poAllocation = allocation.byPurchaseOrder[poId] || { landedCosts: [], baseAmount: 0 };
+          group.landedCosts = poAllocation.landedCosts;
+          group.baseLandedCostAmount = poAllocation.baseAmount;
+          group.allocationMethodText = allocation.allocationMethodText;
+        });
+      }
+    }
+
+    preview.groups = Object.keys(groupsByPo).map((poId) => groupsByPo[poId]);
+    const actionableGroups = preview.groups.filter((group) => group.action !== 'Already received');
+    if (!preview.errors.length && !actionableGroups.length) {
+      preview.errors.push('Every LCM Item with a positive Quantity Receipt is already linked to an Item Receipt.');
+    }
+    preview.ok = preview.errors.length === 0;
+    return preview;
+  }
+
+  function createItemReceipts(parentId) {
+    const preview = buildItemReceiptPreview(parentId);
+    if (!preview.ok) {
+      const error = new Error(preview.errors.join('\n') || 'No Item Receipts are ready to create.');
+      error.preview = preview;
+      throw error;
+    }
+
+    // Transform every PO and validate its exact source lines before saving the first receipt.
+    // A source-line or Landed Cost form problem must not create a partial GRN run.
+    const prepared = preview.groups
+      .filter((group) => group.action === 'Create')
+      .map((group) => prepareItemReceipt(group, preview.parentId));
+    const created = [];
+
+    preview.groups
+      .filter((group) => group.action === 'Relink existing receipt')
+      .forEach((group) => {
+        linkLcmItemsToItemReceipt(group.rows, group.existingReceiptId);
+        created.push({
+          label: 'Item Receipt',
+          type: record.Type.ITEM_RECEIPT,
+          id: String(group.existingReceiptId),
+          tranid: group.existingReceiptNumber || String(group.existingReceiptId),
+          action: 'Relinked',
+        });
+      });
+
+    prepared.forEach((entry, index) => {
+      let transaction;
+      try {
+        transaction = entry.save();
+      } catch (error) {
+        throw buildPartialCreateError(error, created, index, prepared.length, 'could not be saved');
+      }
+      created.push(transaction);
+      try {
+        linkLcmItemsToItemReceipt(entry.group.rows, transaction.id);
+      } catch (error) {
+        throw buildPartialCreateError(
+          error,
+          created,
+          index,
+          prepared.length,
+          `was saved as Item Receipt ${transaction.tranid || transaction.id}, but its LCM Item rows could not be linked. Re-running Create Item Receipt will relink the marked receipt instead of creating another one`
+        );
+      }
+    });
+
+    const allReceiptItems = fetchLcmReceiptItems(parentId);
+    const createdBillRows = getCreatedBillRows(parentId);
+    allocateCreatedCosts(parentId, createdBillRows, { reset: true });
+    const finalized = finalizeCostAllocationAfterReceipts(parentId, createdBillRows, allReceiptItems);
+    shipmentStatus.recalculate(parentId);
+
+    return {
+      mode: preview.mode,
+      modeText: preview.modeText,
+      created,
+      processedRowCount: preview.receiptItems.length,
+      allocatedRowCount: finalized.allocatedRowCount,
+      skippedRows: preview.skippedRows,
       allocationTargetCount: preview.allocationTargetCount,
     };
   }
@@ -831,7 +1014,7 @@ define(
     return '';
   }
 
-  function fetchTrackedItems(parentId) {
+  function fetchLcmItemRows(parentId) {
     if (!parentId) return [];
     const f = FIELDS.lcmItems;
     const rows = [];
@@ -839,36 +1022,59 @@ define(
     search
       .create({
         type: RECORDS.lcmItems,
-        filters: [
-          [f.parent, 'anyof', parentId],
-          'AND',
-          [f.trackItem, 'is', 'T'],
-        ],
+        filters: [[f.parent, 'anyof', parentId]],
         columns: [
           'internalid',
+          f.purchaseOrder,
+          f.item,
           f.quantityReceipt,
           f.poRate,
           f.exchangeRate,
+          f.poCurrencyText,
+          f.trackItem,
           f.unitLandedCost,
           f.totalUnitCost,
+          f.poLineKey,
+          f.itemReceipt,
         ],
       })
       .run()
       .each((result) => {
-        const quantity = toNumber(getValue(result, f.quantityReceipt));
-        if (quantity !== null && quantity <= 0) return true;
         rows.push({
           id: getValue(result, 'internalid'),
-          quantity: quantity === null ? 1 : quantity,
+          purchaseOrderId: getValue(result, f.purchaseOrder),
+          purchaseOrderText: getText(result, f.purchaseOrder),
+          itemId: getValue(result, f.item),
+          itemText: getText(result, f.item),
+          quantity: toNumber(getValue(result, f.quantityReceipt)),
           poRate: toNumber(getValue(result, f.poRate)) || 0,
           exchangeRate: toNumber(getValue(result, f.exchangeRate)) || 1,
+          poCurrencyText: getValue(result, f.poCurrencyText) || '',
+          trackItem: isChecked(getValue(result, f.trackItem)),
           unitLandedCost: toNumber(getValue(result, f.unitLandedCost)) || 0,
           totalUnitCost: toNumber(getValue(result, f.totalUnitCost)) || 0,
+          poLineKey: getValue(result, f.poLineKey) || '',
+          itemReceiptId: getValue(result, f.itemReceipt) || '',
+          itemReceiptText: getText(result, f.itemReceipt),
         });
         return true;
       });
 
     return rows;
+  }
+
+  function fetchTrackedItems(parentId) {
+    return fetchLcmItemRows(parentId)
+      .filter((row) => row.trackItem && (row.quantity === null || row.quantity > 0))
+      .map((row) =>
+        Object.assign({}, row, {
+          quantity: row.quantity === null ? 1 : row.quantity,
+        })
+      );
+  }
+
+  function fetchLcmReceiptItems(parentId) {
+    return fetchLcmItemRows(parentId).filter((row) => row.quantity !== null && row.quantity > 0);
   }
 
   function validateRow(row, mode) {
@@ -1999,6 +2205,371 @@ define(
     return ids;
   }
 
+  function hasCreatedItemReceipts(parentId) {
+    return fetchLcmReceiptItems(parentId).some((row) => Boolean(row.itemReceiptId));
+  }
+
+  function buildReceiptLandedCostAllocations(receiptItems, costRows) {
+    const result = {
+      errors: [],
+      allocationMethodText: '',
+      byPurchaseOrder: {},
+    };
+    const trackedItems = (receiptItems || []).filter((row) => row.trackItem);
+    if (!trackedItems.length) {
+      result.errors.push('At least one LCM Item row must have Track Item checked before landed cost can be applied to Item Receipts.');
+      return result;
+    }
+
+    const methods = uniqueIds(
+      (costRows || []).map((row) => getVendorBillLandedCostMethodText(row.allocationMethodText))
+    );
+    if (methods.length > 1) {
+      result.errors.push(
+        `Item Receipt landed cost requires one effective Allocation Method, but the created Bill rows use ${methods.join(', ')}. Use one method on this LCM record, or create separate LCM records.`
+      );
+      return result;
+    }
+    result.allocationMethodText = methods[0] || 'Value';
+
+    const baseByPoAndCategory = {};
+    (costRows || []).forEach((row) => {
+      if (!row.costCategory && !row.costCategoryText) {
+        result.errors.push(`Created Landed Cost row ${row.id} has no Cost Category for Item Receipt allocation.`);
+        return;
+      }
+      const weights = buildAllocationWeights(trackedItems, row.allocationMethodText);
+      const totalWeight = weights.reduce((sum, entry) => sum + entry.weight, 0);
+      if (!totalWeight) {
+        result.errors.push(`Created Landed Cost row ${row.id} has no valid allocation weight.`);
+        return;
+      }
+
+      const categoryKey = row.costCategory || row.costCategoryText;
+      const baseCostAmount = (row.amount || 0) * (row.exchangeRate || 1);
+      weights.forEach((entry) => {
+        const poId = entry.item.purchaseOrderId;
+        if (!poId) {
+          result.errors.push(`Tracked LCM Item ${entry.item.id} has no Purchase Order for Item Receipt allocation.`);
+          return;
+        }
+        if (!baseByPoAndCategory[poId]) baseByPoAndCategory[poId] = {};
+        if (!baseByPoAndCategory[poId][categoryKey]) {
+          baseByPoAndCategory[poId][categoryKey] = {
+            costCategory: row.costCategory,
+            costCategoryText: row.costCategoryText,
+            baseAmount: 0,
+            exchangeRates: {},
+          };
+        }
+        const category = baseByPoAndCategory[poId][categoryKey];
+        category.baseAmount += baseCostAmount * (entry.weight / totalWeight);
+        category.exchangeRates[String(entry.item.exchangeRate || 1)] = true;
+      });
+    });
+
+    if (result.errors.length) return result;
+
+    Object.keys(baseByPoAndCategory).forEach((poId) => {
+      const categories = baseByPoAndCategory[poId];
+      const landedCosts = [];
+      let baseAmount = 0;
+      Object.keys(categories).forEach((categoryKey) => {
+        const category = categories[categoryKey];
+        const exchangeRates = Object.keys(category.exchangeRates);
+        if (exchangeRates.length !== 1) {
+          result.errors.push(
+            `Tracked LCM Items for PO ${poId} have inconsistent PO exchange rates for Cost Category ${category.costCategoryText || categoryKey}.`
+          );
+          return;
+        }
+        const poExchangeRate = toNumber(exchangeRates[0]) || 1;
+        const receiptAmount = roundCurrency(category.baseAmount / poExchangeRate);
+        landedCosts.push({
+          costCategory: category.costCategory,
+          costCategoryText: category.costCategoryText,
+          baseAmount: roundCurrency(category.baseAmount),
+          amount: receiptAmount,
+        });
+        baseAmount += category.baseAmount;
+      });
+      result.byPurchaseOrder[poId] = {
+        landedCosts,
+        baseAmount: roundCurrency(baseAmount),
+      };
+    });
+
+    return result;
+  }
+
+  function prepareItemReceipt(group, parentId) {
+    const receipt = record.transform({
+      fromType: record.Type.PURCHASE_ORDER,
+      fromId: group.purchaseOrderId,
+      toType: record.Type.ITEM_RECEIPT,
+      isDynamic: false,
+    });
+    const poLinesByKey = loadPurchaseOrderLineIndex(group.purchaseOrderId);
+    const receiptLineCount = getLineCount(receipt, 'item');
+    const usedReceiptLines = {};
+
+    for (let line = 0; line < receiptLineCount; line += 1) {
+      receipt.setSublistValue({ sublistId: 'item', fieldId: 'itemreceive', line, value: false });
+    }
+
+    (group.rows || []).forEach((row) => {
+      const sourceLineKey = extractPoLineUniqueKey(group.purchaseOrderId, row.poLineKey);
+      const sourceLine = sourceLineKey ? poLinesByKey[sourceLineKey] : null;
+      if (!sourceLine) {
+        throw new Error(
+          `LCM Item ${row.id} cannot be matched to a current line on PO ${group.purchaseOrderText}. Its PO Line Key is "${row.poLineKey || '(blank)'}".`
+        );
+      }
+      const receiptLine = findTransformedItemReceiptLine(receipt, sourceLine);
+      if (receiptLine < 0) {
+        throw new Error(
+          `LCM Item ${row.id} could not find PO line ${sourceLineKey} on the transformed Item Receipt for ${group.purchaseOrderText}.`
+        );
+      }
+      if (usedReceiptLines[receiptLine]) {
+        throw new Error(`More than one LCM Item row resolves to Item Receipt line ${receiptLine + 1} for PO ${group.purchaseOrderText}.`);
+      }
+      usedReceiptLines[receiptLine] = true;
+      receipt.setSublistValue({ sublistId: 'item', fieldId: 'itemreceive', line: receiptLine, value: true });
+      receipt.setSublistValue({ sublistId: 'item', fieldId: 'quantity', line: receiptLine, value: row.quantity });
+
+      const appliedQuantity = toNumber(getSublistValue(receipt, 'item', 'quantity', receiptLine));
+      if (
+        !isChecked(getSublistValue(receipt, 'item', 'itemreceive', receiptLine)) ||
+        appliedQuantity === null ||
+        Math.abs(appliedQuantity - row.quantity) > 0.000001
+      ) {
+        throw new Error(`LCM Item ${row.id} could not set its receive quantity on the transformed Item Receipt.`);
+      }
+    });
+
+    const sourceKey = buildItemReceiptSourceKey(parentId, group.purchaseOrderId);
+    setRequiredItemReceiptSourceKey(receipt, sourceKey, group.purchaseOrderText);
+    appendItemReceiptMemo(receipt, parentId, group.purchaseOrderText);
+    applyItemReceiptLandedCosts(receipt, group);
+
+    return {
+      group,
+      save() {
+        const id = receipt.save({ enableSourcing: true, ignoreMandatoryFields: false });
+        return makeTransactionResult('Item Receipt', record.Type.ITEM_RECEIPT, id, 'Created');
+      },
+    };
+  }
+
+  function loadPurchaseOrderLineIndex(purchaseOrderId) {
+    const po = record.load({ type: record.Type.PURCHASE_ORDER, id: purchaseOrderId, isDynamic: false });
+    const linesByKey = {};
+    const count = getLineCount(po, 'item');
+    for (let line = 0; line < count; line += 1) {
+      const lineUniqueKey = normalizeValue(getSublistValue(po, 'item', 'lineuniquekey', line)).trim();
+      if (!lineUniqueKey) continue;
+      const lineNumber = normalizeValue(getSublistValue(po, 'item', 'line', line)).trim();
+      linesByKey[lineUniqueKey] = {
+        lineUniqueKey,
+        itemId: normalizeValue(getSublistValue(po, 'item', 'item', line)).trim(),
+        orderLineCandidates: uniqueIds([lineNumber, String(line + 1), lineUniqueKey]),
+      };
+    }
+    return linesByKey;
+  }
+
+  function extractPoLineUniqueKey(purchaseOrderId, poLineKey) {
+    const prefix = `${purchaseOrderId}:`;
+    const value = normalizeValue(poLineKey).trim();
+    if (!value || value.indexOf(prefix) !== 0) return '';
+    const key = value.slice(prefix.length);
+    return key.indexOf('line:') === 0 ? '' : key;
+  }
+
+  function findTransformedItemReceiptLine(receipt, sourceLine) {
+    const candidates = sourceLine.orderLineCandidates || [];
+    const count = getLineCount(receipt, 'item');
+    for (let line = 0; line < count; line += 1) {
+      const orderLine = normalizeValue(getSublistValue(receipt, 'item', 'orderline', line)).trim();
+      const lineUniqueKey = normalizeValue(getSublistValue(receipt, 'item', 'lineuniquekey', line)).trim();
+      if (candidates.indexOf(orderLine) >= 0 || (lineUniqueKey && lineUniqueKey === sourceLine.lineUniqueKey)) return line;
+    }
+    return -1;
+  }
+
+  function buildItemReceiptSourceKey(parentId, purchaseOrderId) {
+    return `LCM${parentId}::PO${purchaseOrderId}`;
+  }
+
+  function setRequiredItemReceiptSourceKey(receipt, sourceKey, purchaseOrderText) {
+    const fieldId = TRANSACTION_FIELDS.itemReceipt.sourceKey;
+    try {
+      receipt.setValue({ fieldId, value: sourceKey });
+      if (normalizeValue(getRecordValue(receipt, fieldId)) !== sourceKey) {
+        throw new Error('the value was not retained by the Item Receipt form');
+      }
+    } catch (error) {
+      throw new Error(
+        `Item Receipt for PO ${purchaseOrderText} could not be marked with ${fieldId}. Deploy the LCM Item Receipt Source Key field before creating receipts. ${
+          error.message || error
+        }`
+      );
+    }
+  }
+
+  function appendItemReceiptMemo(receipt, parentId, purchaseOrderText) {
+    const marker = `LCM ${parentId} / ${purchaseOrderText}`;
+    const existingMemo = normalizeValue(getRecordValue(receipt, 'memo')).trim();
+    if (existingMemo.indexOf(marker) >= 0) return;
+    receipt.setValue({ fieldId: 'memo', value: [existingMemo, marker].filter(Boolean).join(' | ') });
+  }
+
+  function applyItemReceiptLandedCosts(receipt, group) {
+    const landedCosts = (group.landedCosts || []).filter((entry) => (entry.amount || 0) !== 0);
+    if (!landedCosts.length) return;
+    if (!setItemReceiptLandedCostMethod(receipt, group.allocationMethodText)) {
+      throw new Error(
+        `Item Receipt for PO ${group.purchaseOrderText} does not expose the Landed Cost Allocation Method field.`
+      );
+    }
+
+    landedCosts.forEach((entry) => {
+      if (!setItemReceiptLandedCostSourceManual(receipt, entry) || !setItemReceiptLandedCostAmount(receipt, entry, entry.amount)) {
+        throw new Error(
+          `Item Receipt for PO ${group.purchaseOrderText} could not apply Manual landed cost for category ${
+            entry.costCategoryText || entry.costCategory
+          }. Verify that the Landed Cost feature, category, and Item Receipt form are enabled.`
+        );
+      }
+    });
+  }
+
+  function setItemReceiptLandedCostMethod(receipt, allocationMethodText) {
+    const methodText = getVendorBillLandedCostMethodText(allocationMethodText);
+    const fieldIds = [TRANSACTION_FIELDS.itemReceipt.landedCostMethod, 'landedCostMethod'];
+    const values = getVendorBillLandedCostMethodValues(methodText);
+    for (let index = 0; index < fieldIds.length; index += 1) {
+      const fieldId = fieldIds[index];
+      try {
+        receipt.setText({ fieldId, text: methodText });
+      } catch (textError) {
+        for (let valueIndex = 0; valueIndex < values.length; valueIndex += 1) {
+          try {
+            receipt.setValue({ fieldId, value: values[valueIndex] });
+            break;
+          } catch (valueError) {
+            // Try the next NetSuite representation.
+          }
+        }
+      }
+      const applied = normalizeChoice(getRecordText(receipt, fieldId) || getRecordValue(receipt, fieldId));
+      if (applied === normalizeChoice(methodText)) return true;
+    }
+    return false;
+  }
+
+  function setItemReceiptLandedCostSourceManual(receipt, costCategory) {
+    const fieldIds = getTransactionLandedCostFieldIds(receipt, 'source', costCategory);
+    const values = ['MANUAL', 'Manual', 'manual'];
+    for (let fieldIndex = 0; fieldIndex < fieldIds.length; fieldIndex += 1) {
+      const fieldId = fieldIds[fieldIndex];
+      try {
+        receipt.setText({ fieldId, text: 'Manual' });
+      } catch (textError) {
+        for (let valueIndex = 0; valueIndex < values.length; valueIndex += 1) {
+          try {
+            receipt.setValue({ fieldId, value: values[valueIndex] });
+            break;
+          } catch (valueError) {
+            // Try the next source value representation.
+          }
+        }
+      }
+      const applied = normalizeChoice(getRecordText(receipt, fieldId) || getRecordValue(receipt, fieldId));
+      if (applied === 'manual') return true;
+    }
+    return false;
+  }
+
+  function setItemReceiptLandedCostAmount(receipt, costCategory, amount) {
+    const expectedAmount = roundCurrency(amount);
+    const fieldIds = getTransactionLandedCostFieldIds(receipt, 'amount', costCategory);
+    for (let fieldIndex = 0; fieldIndex < fieldIds.length; fieldIndex += 1) {
+      const fieldId = fieldIds[fieldIndex];
+      try {
+        receipt.setValue({ fieldId, value: expectedAmount });
+      } catch (error) {
+        continue;
+      }
+      const appliedAmount = toNumber(getRecordValue(receipt, fieldId));
+      if (appliedAmount !== null && Math.abs(appliedAmount - expectedAmount) < 0.005) return true;
+    }
+    return false;
+  }
+
+  function getTransactionLandedCostFieldIds(rec, kind, costCategory) {
+    const resolvedSuffix = findLandedCostFieldSuffixByLabel(rec, costCategory.costCategoryText);
+    const suffix = resolvedSuffix || String(costCategory.costCategory || '');
+    const prefix = kind === 'source' ? 'landedcostsource' : 'landedcostamount';
+    const fieldIds = suffix ? [`${prefix}${suffix}`, `${prefix}_${suffix}`] : [];
+    return fieldIds.filter((fieldId, index) => fieldId && fieldIds.indexOf(fieldId) === index);
+  }
+
+  function findGeneratedItemReceipt(parentId, purchaseOrderId) {
+    const sourceKey = buildItemReceiptSourceKey(parentId, purchaseOrderId);
+    const matches = [];
+    search
+      .create({
+        type: search.Type.ITEM_RECEIPT,
+        filters: [[TRANSACTION_FIELDS.itemReceipt.sourceKey, 'is', sourceKey]],
+        columns: ['internalid', 'tranid'],
+      })
+      .run()
+      .each((result) => {
+        matches.push({
+          id: getValue(result, 'internalid'),
+          tranid: getValue(result, 'tranid'),
+        });
+        return true;
+      });
+    if (matches.length > 1) {
+      throw new Error(`Multiple Item Receipts use LCM source key ${sourceKey}. Resolve the duplicate markers before rerunning.`);
+    }
+    return matches[0] || null;
+  }
+
+  function linkLcmItemsToItemReceipt(rows, itemReceiptId) {
+    (rows || []).forEach((row) => {
+      record.submitFields({
+        type: RECORDS.lcmItems,
+        id: row.id,
+        values: { [FIELDS.lcmItems.itemReceipt]: String(itemReceiptId) },
+        options: { enableSourcing: true, ignoreMandatoryFields: true },
+      });
+    });
+  }
+
+  function finalizeCostAllocationAfterReceipts(parentId, rows, existingReceiptItems) {
+    const receiptItems = existingReceiptItems || fetchLcmReceiptItems(parentId);
+    if (!receiptItems.length || receiptItems.some((row) => !row.itemReceiptId)) {
+      return { complete: false, allocatedRowCount: 0 };
+    }
+    const costRows = (rows || []).filter((row) => row.targetMode === MODES.bill);
+    if (!costRows.length) return { complete: false, allocatedRowCount: 0 };
+
+    // The caller has already refreshed the LCM Item values. Only mark the cost rows after
+    // every positive-quantity item row is linked to its receipt.
+    markCostRowsAllocated(costRows, collectItemReceiptNumbers(receiptItems));
+    return { complete: true, allocatedRowCount: costRows.length };
+  }
+
+  function collectItemReceiptNumbers(items) {
+    return uniqueIds(
+      (items || []).map((row) => row.itemReceiptText || row.itemReceiptId).filter(Boolean)
+    );
+  }
+
   function allocateCreatedCosts(parentId, rows, options) {
     const allocatableRows = (rows || []).filter((row) => row.targetMode === MODES.bill);
     if (!allocatableRows.length) return;
@@ -2073,18 +2644,26 @@ define(
     });
   }
 
-  function markCostRowsAllocated(rows) {
+  function markCostRowsAllocated(rows, grnNumbers) {
     const f = FIELDS.lcmLandedCosts;
+    const grnNumber = formatGrnNumberList(grnNumbers);
     rows.forEach((row) => {
+      const values = {
+        [f.costAllocatedInGrn]: true,
+      };
+      if (grnNumber) values[f.grnNumber] = grnNumber;
       record.submitFields({
         type: RECORDS.lcmLandedCosts,
         id: row.id,
-        values: {
-          [f.costAllocatedInGrn]: true,
-        },
+        values,
         options: { enableSourcing: true, ignoreMandatoryFields: true },
       });
     });
+  }
+
+  function formatGrnNumberList(numbers) {
+    const value = uniqueIds(numbers || []).join(', ');
+    return value.length <= 300 ? value : `${value.slice(0, 297)}...`;
   }
 
   function makeTransactionResult(label, type, id, action) {
@@ -2179,7 +2758,9 @@ define(
     STATUS,
     buildPreview,
     buildAllocationPreview,
+    buildItemReceiptPreview,
     createTransactions,
+    createItemReceipts,
     fetchLandedCostRows,
     getAllocationMethodDefault,
     getCostItemMapDefaults,

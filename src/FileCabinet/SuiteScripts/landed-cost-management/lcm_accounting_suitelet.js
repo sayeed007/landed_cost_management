@@ -25,9 +25,13 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         renderCostCategoryItemMatches(context);
       } else if (context.request.method === 'GET' && context.request.parameters.action === 'allocationPreview') {
         renderAllocationPreview(context);
+      } else if (context.request.method === 'GET' && context.request.parameters.action === 'itemReceiptPreview') {
+        renderItemReceiptPreview(context);
       } else if (context.request.method === 'POST') {
         if (context.request.parameters.custpage_action === 'recalculateAllocation') {
           renderAllocationResult(context);
+        } else if (context.request.parameters.custpage_action === 'createItemReceipts') {
+          renderItemReceiptResult(context);
         } else {
           renderResult(context);
         }
@@ -132,6 +136,21 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
     context.response.writePage(form);
   }
 
+  function renderItemReceiptPreview(context) {
+    const parentId = context.request.parameters.parentId || '';
+    const preview = accounting.buildItemReceiptPreview(parentId);
+    const form = serverWidget.createForm({ title: 'LCM Create Item Receipts' });
+
+    addHidden(form, 'custpage_parent_id', parentId);
+    addHidden(form, 'custpage_action', 'createItemReceipts');
+    addHtml(form, renderItemReceiptPreviewHtml(preview));
+    if (preview.ok) {
+      form.addSubmitButton({ label: 'Confirm Create Item Receipts' });
+    }
+
+    context.response.writePage(form);
+  }
+
   function renderResult(context) {
     const parentId = context.request.parameters.custpage_parent_id || '';
     const mode = accounting.normalizeMode(context.request.parameters.custpage_mode || 'bill');
@@ -145,6 +164,14 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
     const parentId = context.request.parameters.custpage_parent_id || '';
     const result = accounting.recalculateAllocatedCosts(parentId);
     const form = serverWidget.createForm({ title: 'LCM Landed Cost Recalculated' });
+    addHtml(form, renderResultHtml(result, parentRecordUrl(parentId)));
+    context.response.writePage(form);
+  }
+
+  function renderItemReceiptResult(context) {
+    const parentId = context.request.parameters.custpage_parent_id || '';
+    const result = accounting.createItemReceipts(parentId);
+    const form = serverWidget.createForm({ title: 'LCM Item Receipts Processed' });
     addHtml(form, renderResultHtml(result, parentRecordUrl(parentId)));
     context.response.writePage(form);
   }
@@ -192,6 +219,40 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         <p>Created Bill rows: ${preview.createdBillRows.length}. Pending allocation rows: ${preview.unallocatedCreatedRows.length}. Allocation target item rows: ${preview.allocationTargetCount}.</p>
         ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
         <p class="lcm-muted">This action does not create or append Vendor Bills. It recalculates item landed cost fresh from all created Bill-type Landed Cost rows on this LCM record.</p>
+        <p class="lcm-muted">Close this window without confirming if the preview is not correct.</p>
+      </div>
+    `;
+  }
+
+  function renderItemReceiptPreviewHtml(preview) {
+    const rows = (preview.groups || [])
+      .map((group) => {
+        const quantity = (group.rows || []).reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
+        const costSummary = (group.landedCosts || [])
+          .map(
+            (entry) =>
+              `${escapeHtml(entry.costCategoryText || entry.costCategory || '')}: ${escapeHtml(String(entry.amount || 0))}`
+          )
+          .join('<br>');
+        return `<tr>
+          <td>${escapeHtml(group.purchaseOrderText || group.purchaseOrderId || '')}</td>
+          <td>${escapeHtml(group.action || '')}</td>
+          <td>${(group.rows || []).length}</td>
+          <td>${escapeHtml(String(quantity))}</td>
+          <td>${escapeHtml(group.currencyText || '')}</td>
+          <td>${escapeHtml(String(group.baseLandedCostAmount || 0))}</td>
+          <td>${costSummary || '-'}</td>
+        </tr>`;
+      })
+      .join('');
+    return `
+      ${sharedStyles()}
+      <div class="lcm-box">
+        <h3>Preview Item Receipt Creation</h3>
+        <p>PO receipts: ${(preview.groups || []).length}. Item rows: ${(preview.receiptItems || []).length}. Allocation target item rows: ${preview.allocationTargetCount}. Created Bill rows: ${(preview.createdBillRows || []).length}.</p>
+        ${preview.errors.length ? `<div class="lcm-error">${preview.errors.map(escapeHtml).join('<br>')}</div>` : ''}
+        ${rows ? `<table class="lcm-table"><thead><tr><th>Purchase Order</th><th>Action</th><th>Item Rows</th><th>Receive Qty</th><th>PO Currency</th><th>Base Landed Cost</th><th>Manual Landed Cost by Category</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+        <p class="lcm-muted">Each receipt is transformed from its Purchase Order. LCM Items are linked to the resulting GRN. A Bill spanning several POs is allocated as Manual landed cost per receipt because NetSuite permits an Other Transaction Bill source on only one Item Receipt.</p>
         <p class="lcm-muted">Close this window without confirming if the preview is not correct.</p>
       </div>
     `;
@@ -283,7 +344,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
       ${sharedStyles()}
       <div class="lcm-box">
         <h3>${escapeHtml(result.modeText)} processing complete</h3>
-        <p>Processed rows: ${result.processedRowCount}. Allocated landed-cost rows: ${result.allocatedRowCount}. Allocation target item rows: ${result.allocationTargetCount}.</p>
+        <p>Processed rows: ${result.processedRowCount}. GRN-allocated landed-cost rows: ${result.allocatedRowCount}. Allocation target item rows: ${result.allocationTargetCount}.</p>
         ${transactionTable}
         ${backUrl ? `<p><a href="${escapeHtml(backUrl)}">Back to Landed Cost Management</a></p>` : ''}
       </div>

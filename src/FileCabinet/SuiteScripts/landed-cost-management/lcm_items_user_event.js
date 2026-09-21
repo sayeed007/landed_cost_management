@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', './lcm_po_selection_config', './lcm_shipment_status_lib'], (error, config, shipmentStatus) => {
+define(['N/error', 'N/record', './lcm_po_selection_config', './lcm_shipment_status_lib'], (error, record, config, shipmentStatus) => {
   const { FIELDS } = config;
 
   function beforeSubmit(context) {
@@ -10,8 +10,16 @@ define(['N/error', './lcm_po_selection_config', './lcm_shipment_status_lib'], (e
 
     const rec = context.newRecord;
     const f = FIELDS.lcmItems;
-    const expectedQuantity = toNumber(getValue(rec, f.expectedQuantityReceipt)) || 0;
-    const quantityReceipt = toNumber(getValue(rec, f.quantityReceipt)) || 0;
+    const changedFields = getChangedFieldMap(rec);
+    const xedit = isXedit(context);
+    assertReceiptFieldsAreLocked(context, f, changedFields);
+
+    // An xedit newRecord contains only the submitted fields. Load the persisted row and
+    // overlay those fields before deriving values, otherwise linking an Item Receipt could
+    // accidentally recalculate quantity/value fields as zero.
+    const source = loadPersistedItemForXedit(context, rec);
+    const expectedQuantity = toNumber(getEffectiveValue(rec, source, f.expectedQuantityReceipt, changedFields, xedit)) || 0;
+    const quantityReceipt = toNumber(getEffectiveValue(rec, source, f.quantityReceipt, changedFields, xedit)) || 0;
 
     if (quantityReceipt < 0) {
       throw error.create({
@@ -34,12 +42,16 @@ define(['N/error', './lcm_po_selection_config', './lcm_shipment_status_lib'], (e
     setValueIfPresent(
       rec,
       f.poValue,
-      roundCurrency((toNumber(getValue(rec, f.poRate)) || 0) * (toNumber(getValue(rec, f.exchangeRate)) || 1) * quantityReceipt)
+      roundCurrency(
+        (toNumber(getEffectiveValue(rec, source, f.poRate, changedFields, xedit)) || 0) *
+          (toNumber(getEffectiveValue(rec, source, f.exchangeRate, changedFields, xedit)) || 1) *
+          quantityReceipt
+      )
     );
     setValueIfPresent(
       rec,
       f.totalValue,
-      roundCurrency((toNumber(getValue(rec, f.totalUnitCost)) || 0) * quantityReceipt)
+      roundCurrency((toNumber(getEffectiveValue(rec, source, f.totalUnitCost, changedFields, xedit)) || 0) * quantityReceipt)
     );
   }
 
@@ -59,6 +71,60 @@ define(['N/error', './lcm_po_selection_config', './lcm_shipment_status_lib'], (e
     } catch (error) {
       return '';
     }
+  }
+
+  function getChangedFieldMap(rec) {
+    const fields = {};
+    try {
+      (rec.getFields() || []).forEach((fieldId) => {
+        fields[fieldId] = true;
+      });
+    } catch (error) {
+      // Normal create/edit records do not need an xedit field map.
+    }
+    return fields;
+  }
+
+  function isXedit(context) {
+    return context.type === context.UserEventType.XEDIT;
+  }
+
+  function loadPersistedItemForXedit(context, rec) {
+    if (!isXedit(context) || !rec.id) return null;
+    try {
+      return record.load({ type: rec.type, id: rec.id, isDynamic: false });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getEffectiveValue(newRecord, persistedRecord, fieldId, changedFields, xedit) {
+    if (!xedit || changedFields[fieldId] || !persistedRecord) return getValue(newRecord, fieldId);
+    return getValue(persistedRecord, fieldId);
+  }
+
+  function assertReceiptFieldsAreLocked(context, f, changedFields) {
+    if (!context.oldRecord || !context.newRecord.id) return;
+
+    const persisted = loadPersistedItemForXedit(context, context.newRecord) || context.oldRecord;
+    if (!getValue(persisted, f.itemReceipt)) return;
+
+    const protectedFields = [f.purchaseOrder, f.item, f.poLineKey, f.quantityReceipt, f.trackItem, f.itemReceipt];
+    const changed = protectedFields.some((fieldId) => {
+      if (isXedit(context)) return Boolean(changedFields[fieldId]);
+      return normalizeValue(getValue(context.newRecord, fieldId)) !== normalizeValue(getValue(context.oldRecord, fieldId));
+    });
+    if (!changed) return;
+
+    throw error.create({
+      name: 'LCM_ITEM_RECEIPT_LOCKED',
+      message: 'This LCM Item is linked to an Item Receipt and its PO, item, receipt quantity, tracking, and Item Receipt reference cannot be changed.',
+      notifyOff: false,
+    });
+  }
+
+  function normalizeValue(value) {
+    return value === null || value === undefined ? '' : String(value);
   }
 
   function setValueIfPresent(rec, fieldId, value) {
