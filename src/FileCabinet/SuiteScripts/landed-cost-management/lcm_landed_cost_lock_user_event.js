@@ -5,7 +5,6 @@
 define(
   [
     'N/error',
-    'N/format',
     'N/log',
     'N/record',
     'N/ui/serverWidget',
@@ -15,7 +14,6 @@ define(
   ],
   (
   error,
-  format,
   log,
   record,
   serverWidget,
@@ -241,13 +239,9 @@ define(
 
   function sourceVendorDefaults(rec) {
     const f = FIELDS.lcmLandedCosts;
-    if (!rec.getValue({ fieldId: f.createdDate })) {
-      rec.setText({ fieldId: f.createdDate, text: todayDateText() });
-    }
     const parentDefaults = getParentDefaults(rec);
     setDefaultTextIfBlank(rec, f.targetType, config.DEFAULTS.targetTypeText);
     setDefaultIfBlank(rec, f.effectiveDate, new Date());
-    setDefaultIfBlank(rec, f.location, parentDefaults.location, parentDefaults.locationText);
     sourceCostCategoryRefs(rec);
     sourceAllocationMethodDefault(rec);
     setTextIfPresent(rec, f.billLineType, config.DEFAULTS.billLineTypeText);
@@ -279,14 +273,9 @@ define(
         id: parentId,
         isDynamic: false,
       });
-      const poDefaults = accounting.getSelectedPurchaseOrderDefaults(
-        parent.getValue({ fieldId: FIELDS.landedCostManagement.selectedPurchaseOrders })
-      );
       return {
         vendor: parent.getValue({ fieldId: FIELDS.landedCostManagement.vendor }),
         subsidiary: parent.getValue({ fieldId: FIELDS.landedCostManagement.subsidiary }),
-        location: poDefaults.location,
-        locationText: poDefaults.locationText,
       };
     } catch (loadError) {
       return {};
@@ -366,13 +355,6 @@ define(
     }
   }
 
-  function todayDateText() {
-    return format.format({
-      value: new Date(),
-      type: format.Type.DATE,
-    });
-  }
-
   function protectedFields() {
     const f = FIELDS.lcmLandedCosts;
     return [
@@ -390,7 +372,6 @@ define(
       f.effectiveDate,
       f.allocationMethod,
       f.billItem,
-      f.location,
       f.memo,
     ];
   }

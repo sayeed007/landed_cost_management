@@ -183,7 +183,7 @@ On Landed Cost row Vendor Name change:
 - Rename Target Type to Document Type and default it to Bill.
 - Keep Currency and Exchange Rate editable after defaulting; refresh Exchange Rate when Currency changes.
 - Make Effective Date mandatory and default it to today's date.
-- Default Location from the first selected PO's Location when available.
+- Do not store Location on Landed Cost rows. Display the read-only `Receiving Location` on each LCM Item from the PO line Location, with the PO header Location as fallback. Write both the location ID and text in the PO selector so it displays before first save, then backfill any pre-existing blank LCM Item value when the LCM form loads.
 
 On Landed Cost row LC Cost Category change:
 
@@ -195,7 +195,7 @@ On Landed Cost row LC Cost Category change:
 On Create Bill:
 
 - Group Vendor Bills by landed-cost Vendor Name, Subsidiary, and Currency. Exchange Rate does not split a same-vendor/same-currency Bill; the first Bill header rate is retained while each source row's rate remains authoritative for base-currency allocation.
-- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Location, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values.
+- Within each Vendor Bill group, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values.
 - Build the merge identity from internal IDs first, falling back to normalized display text only for a value that has no internal ID. Key the Allocation Method on the effective NetSuite method instead, so a blank or non-NetSuite list value merges with the Value rows it will be allocated alongside. Rehydrate the hidden native Cost Category and LC Cost Item from the selected mapping record before validating the row and before building the key, so stale or blank hidden values cannot split equivalent lines. Never decide a merge on display text alone.
 - When appending to an existing generated Vendor Bill, match existing cost lines by the same ID-first identity - item strictly, then category - consolidate them into one line, and re-stamp the Cost Category after writing rate and amount.
 - Do not merge different LC Cost Categories, different LC Cost Items, or different Allocation Methods.
@@ -226,6 +226,7 @@ On Create Item Receipt:
 
 - Require every Bill-type Landed Cost row to be Created before receipt confirmation.
 - Transform one Item Receipt from each selected PO and receive only the positive-quantity LCM Items matched by PO Line Key.
+- Inspect each transformed receipt in the preview. When NetSuite requires Inventory Detail, list each affected LCM Item and create one automatic assignment for the LCM receipt quantity. Nonserialized lot items use Receipt Inventory Number `Shipment Number + Item`; required receiving bins preserve NetSuite's transformed-receipt location default, with `DEFAULTS.itemReceipt` as fallback. A required Inventory Status resolves the active standard NetSuite default when not sourced by the transformed record, then uses the optional `DEFAULTS.itemReceipt` location fallback only if account lookup cannot resolve it. Refuse serialized items and items requiring Expiration Date because LCM cannot generate physical serial or supplier expiry data.
 - Stamp each Item Receipt with `custbody_lcm_ir_source_key`, then link each LCM Item through `custrecord_lcmitems_item_receipt`.
 - Calculate the PO-specific landed-cost share in base currency from tracked items, convert it to the PO receipt currency, and write it as Manual landed cost by category. Do not source the Vendor Bill as Other Transaction when one Bill spans multiple Item Receipts; NetSuite permits that source on one receipt only.
 - Reject mixed effective allocation methods across the created Bill rows.

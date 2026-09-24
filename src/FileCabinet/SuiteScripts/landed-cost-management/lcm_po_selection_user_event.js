@@ -52,6 +52,7 @@ define(
       FIELDS.lcmItems.quantityRemaining,
       FIELDS.lcmItems.billStatus,
       FIELDS.lcmItems.unitType,
+      FIELDS.lcmItems.receivingLocation,
       FIELDS.lcmItems.poCurrencyText,
       FIELDS.lcmItems.poRate,
       FIELDS.lcmItems.poValue,

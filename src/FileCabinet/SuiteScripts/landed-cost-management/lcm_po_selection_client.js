@@ -359,24 +359,6 @@ ${defaults.reason || ''}`
     const sublistId = getLandedCostSublistId(contextSublistId);
     setDefaultTextIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.targetType, config.DEFAULTS.targetTypeText);
     setDefaultValueIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.effectiveDate, new Date());
-    applyDefaultPoLocation(rec, sublistId);
-  }
-
-  function applyDefaultPoLocation(rec, sublistId) {
-    if (getLandedCostValue(rec, sublistId, FIELDS.lcmLandedCosts.location)) return;
-
-    const selectedPoIds = normalizeIds(safeGetValue(rec, FIELDS.landedCostManagement.selectedPurchaseOrders));
-    if (!selectedPoIds.length) return;
-
-    try {
-      const defaults = fetchSelectedPoDefaults(selectedPoIds);
-      applyDefault(rec, sublistId, FIELDS.lcmLandedCosts.location, defaults.location, defaults.locationText);
-    } catch (error) {
-      log.audit({
-        title: 'LCM PO location default was not sourced',
-        details: error.message || error,
-      });
-    }
   }
 
   function isItemRecalculationField(fieldId) {
@@ -518,21 +500,6 @@ ${defaults.reason || ''}`
     const response = https.get({ url: suiteletUrl });
     const payload = JSON.parse(response.body || '{}');
     if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return currency exchange defaults.');
-    return payload.defaults || {};
-  }
-
-  function fetchSelectedPoDefaults(poIds) {
-    const suiteletUrl = url.resolveScript({
-      scriptId: SCRIPTS.accountingSuitelet.scriptId,
-      deploymentId: SCRIPTS.accountingSuitelet.deploymentId,
-      params: {
-        action: 'selectedPoDefaults',
-        poIds: normalizeIds(poIds).join(','),
-      },
-    });
-    const response = https.get({ url: suiteletUrl });
-    const payload = JSON.parse(response.body || '{}');
-    if (!payload.ok) throw new Error(payload.message || 'Suitelet did not return selected PO defaults.');
     return payload.defaults || {};
   }
 
@@ -763,6 +730,8 @@ ${defaults.reason || ''}`
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.quantityRemaining, poLine.quantityRemaining);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.billStatus, poLine.billStatus);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.unitType, poLine.unitType);
+    setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.receivingLocation, poLine.receivingLocation);
+    setTextIfPresent(rec, sublistId, FIELDS.lcmItems.receivingLocation, poLine.receivingLocationText);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poCurrencyText, poLine.poCurrencyText);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poRate, poLine.poRate);
     setCurrentIfPresent(rec, sublistId, FIELDS.lcmItems.poValue, poLine.poValue);

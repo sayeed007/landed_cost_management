@@ -94,7 +94,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       .create({
         type: search.Type.PURCHASE_ORDER,
         filters,
-        columns: ['internalid', 'tranid', 'entity'],
+        columns: ['internalid', 'tranid', 'entity', 'location'],
       })
       .run()
       .each((result) => {
@@ -104,6 +104,8 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           poNumber: String(result.getValue({ name: 'tranid' }) || ''),
           vendorId: String(result.getValue({ name: 'entity' }) || ''),
           vendorText: String(result.getText({ name: 'entity' }) || ''),
+          location: String(result.getValue({ name: 'location' }) || ''),
+          locationText: String(result.getText({ name: 'location' }) || ''),
         };
         return true;
       });
@@ -184,6 +186,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
         'unit',
         'currency',
         'exchangerate',
+        'location',
         'lineuniquekey',
         itemTypeColumn,
       ],
@@ -203,6 +206,8 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       const itemTypeText = String(result.getText(itemTypeColumn) || '');
       const poRate = toNumber(result.getValue({ name: 'rate' }));
       const exchangeRate = String(result.getValue({ name: 'exchangerate' }) || '');
+      const lineLocation = String(result.getValue({ name: 'location' }) || '');
+      const lineLocationText = String(result.getText({ name: 'location' }) || '');
 
       if ((expectedQuantityReceipt || 0) <= 0) {
         lineIndex += 1;
@@ -232,6 +237,8 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
         poValue: getLineValue(poRate, expectedQuantityReceipt, exchangeRate),
         poCurrencyText: String(result.getText({ name: 'currency' }) || result.getValue({ name: 'currency' }) || ''),
         unitType: String(result.getText({ name: 'unit' }) || result.getValue({ name: 'unit' }) || ''),
+        receivingLocation: lineLocation || header.location || '',
+        receivingLocationText: lineLocationText || header.locationText || '',
         exchangeRate,
         lineUniqueKey,
         poLineKey: makeLineKey(poId, lineUniqueKey, itemId, lineIndex),
@@ -338,6 +345,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           FIELDS.lcmItems.quantityRemaining,
           FIELDS.lcmItems.billStatus,
           FIELDS.lcmItems.unitType,
+          FIELDS.lcmItems.receivingLocation,
           FIELDS.lcmItems.poRate,
           FIELDS.lcmItems.poValue,
           FIELDS.lcmItems.exchangeRate,
@@ -362,6 +370,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           quantityRemaining: toNumber(result.getValue({ name: FIELDS.lcmItems.quantityRemaining })),
           billStatus: String(result.getValue({ name: FIELDS.lcmItems.billStatus }) || ''),
           unitType: String(result.getValue({ name: FIELDS.lcmItems.unitType }) || ''),
+          receivingLocation: String(result.getValue({ name: FIELDS.lcmItems.receivingLocation }) || ''),
           poCurrencyText: '',
           poRate: toNumber(result.getValue({ name: FIELDS.lcmItems.poRate })),
           poValue: toNumber(result.getValue({ name: FIELDS.lcmItems.poValue })),
@@ -396,6 +405,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     setIfPresent(rec, FIELDS.lcmItems.quantityRemaining, poLine.quantityRemaining);
     setIfPresent(rec, FIELDS.lcmItems.billStatus, poLine.billStatus);
     setIfPresent(rec, FIELDS.lcmItems.unitType, poLine.unitType);
+    setIfPresent(rec, FIELDS.lcmItems.receivingLocation, poLine.receivingLocation);
     setIfPresent(rec, FIELDS.lcmItems.poCurrencyText, poLine.poCurrencyText);
     setIfPresent(rec, FIELDS.lcmItems.poRate, poLine.poRate);
     setIfPresent(rec, FIELDS.lcmItems.poValue, poLine.poValue);
@@ -431,6 +441,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       getBillStatus(poLine.expectedQuantityReceipt, quantityReceipt)
     );
     setChangedValue(values, FIELDS.lcmItems.unitType, existingRow.unitType, poLine.unitType);
+    setChangedValue(values, FIELDS.lcmItems.receivingLocation, existingRow.receivingLocation, poLine.receivingLocation);
     setChangedValue(values, FIELDS.lcmItems.poCurrencyText, existingRow.poCurrencyText, poLine.poCurrencyText);
     setChangedValue(values, FIELDS.lcmItems.poRate, existingRow.poRate, poLine.poRate);
     setChangedValue(values, FIELDS.lcmItems.poValue, existingRow.poValue, getLineValue(poLine.poRate, quantityReceipt, poLine.exchangeRate));
@@ -576,15 +587,20 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       if (row.poId) poIds.push(row.poId);
     });
 
-    const poCurrencyTextById = fetchPoCurrencyTexts(uniqueIds(poIds));
+    const uniquePoIds = uniqueIds(poIds);
+    const poHeaderValuesById = fetchPurchaseOrderHeaderValues(uniquePoIds);
+    const poLineLocationsByKey = fetchPurchaseOrderLineLocations(uniquePoIds);
     let updatedCount = 0;
 
     rows.forEach((row) => {
       const quantityReceipt = row.quantityReceipt || 0;
       const values = {};
-      const poCurrencyText = poCurrencyTextById[row.poId] || row.poCurrencyText || '';
+      const poHeaderValues = poHeaderValuesById[row.poId] || {};
+      const poCurrencyText = poHeaderValues.currencyText || row.poCurrencyText || '';
+      const receivingLocation = poLineLocationsByKey[row.poLineKey] || poHeaderValues.location || '';
 
       setChangedValue(values, FIELDS.lcmItems.poCurrencyText, row.poCurrencyText, poCurrencyText);
+      setChangedValue(values, FIELDS.lcmItems.receivingLocation, row.receivingLocation, receivingLocation);
       setChangedValue(values, FIELDS.lcmItems.poValue, row.poValue, getLineValue(row.poRate, quantityReceipt, row.exchangeRate));
       setChangedValue(values, FIELDS.lcmItems.totalValue, row.totalValue, getLineValue(row.totalUnitCost, quantityReceipt));
 
@@ -602,9 +618,9 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return { updatedCount };
   }
 
-  function fetchPoCurrencyTexts(poIds) {
-    const currencyById = {};
-    if (!poIds.length) return currencyById;
+  function fetchPurchaseOrderHeaderValues(poIds) {
+    const valuesById = {};
+    if (!poIds.length) return valuesById;
 
     search
       .create({
@@ -614,16 +630,51 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           'AND',
           ['mainline', 'is', 'T'],
         ],
-        columns: ['internalid', 'currency'],
+        columns: ['internalid', 'currency', 'location'],
       })
       .run()
       .each((result) => {
         const poId = String(result.getValue({ name: 'internalid' }) || '');
-        currencyById[poId] = String(result.getText({ name: 'currency' }) || result.getValue({ name: 'currency' }) || '');
+        valuesById[poId] = {
+          currencyText: String(result.getText({ name: 'currency' }) || result.getValue({ name: 'currency' }) || ''),
+          location: String(result.getValue({ name: 'location' }) || ''),
+        };
         return true;
       });
 
-    return currencyById;
+    return valuesById;
+  }
+
+  function fetchPurchaseOrderLineLocations(poIds) {
+    const locationsByKey = {};
+    if (!poIds.length) return locationsByKey;
+
+    search
+      .create({
+        type: search.Type.PURCHASE_ORDER,
+        filters: [
+          ['internalid', 'anyof', poIds],
+          'AND',
+          ['mainline', 'is', 'F'],
+          'AND',
+          ['taxline', 'is', 'F'],
+          'AND',
+          ['shipping', 'is', 'F'],
+          'AND',
+          ['item', 'noneof', '@NONE@'],
+        ],
+        columns: ['internalid', 'location', 'lineuniquekey'],
+      })
+      .run()
+      .each((result) => {
+        const poId = String(result.getValue({ name: 'internalid' }) || '');
+        const lineUniqueKey = String(result.getValue({ name: 'lineuniquekey' }) || '');
+        const location = String(result.getValue({ name: 'location' }) || '');
+        if (poId && lineUniqueKey && location) locationsByKey[makeLineKey(poId, lineUniqueKey)] = location;
+        return true;
+      });
+
+    return locationsByKey;
   }
 
   function uniqueIds(values) {

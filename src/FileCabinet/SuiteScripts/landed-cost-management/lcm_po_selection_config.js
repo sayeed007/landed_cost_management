@@ -29,6 +29,7 @@ define([], () => {
       quantityRemaining: 'custrecord_lcmitems_quantity_remaining',
       billStatus: 'custrecord_lcmitems_bill_status',
       unitType: 'custrecord_lcmitems_unit_type',
+      receivingLocation: 'custrecord_lcmitems_receiving_location',
       poCurrencyText: 'custrecord_lcmitems_po_currency_text',
       poRate: 'custrecord_lcmitems_po_rate',
       poValue: 'custrecord_lcmitems_po_value',
@@ -59,14 +60,11 @@ define([], () => {
       billItem: 'custrecord_lcm_lcm_cost_item',
       department: 'custrecord_lcm_lcm_department',
       class: 'custrecord_lcm_lcm_class',
-      location: 'custrecord_lcm_lcm_location',
       memo: 'custrecord_lcm_lcm_memo',
-      transactionNumber: 'custrecord_lcm_lcm_transaction_number',
       processingStatus: 'custrecord_lcm_lcm_status',
       createdTransactionId: 'custrecord_lcm_lcm_created_tran_id',
       createdTransactionRef: 'custrecord_lcm_lcm_created_tran_ref',
       createdTransactionType: 'custrecord_lcm_lcm_created_tran_type',
-      createdDate: 'custrecord_lcm_lcm_created_date',
       costAllocatedInGrn: 'custrecord_lcm_lcm_cost_allocation_grn',
       grnNumber: 'custrecord_lcm_lcm_grn_number',
     },
@@ -134,6 +132,13 @@ define([], () => {
     billLineTypeText: 'Item',
     billTypeText: 'LC Bill',
     shipmentStatusText: 'To Be Shipped',
+    itemReceipt: {
+      // Configure these once with approved NetSuite internal IDs when the account requires
+      // bin or inventory-status assignments on a receipt. The key is the PO item-line
+      // location ID; `default` is an optional fallback for every receiving location.
+      receivingBinByLocation: {},
+      receivingInventoryStatusByLocation: {},
+    },
   };
 
   const SHIPMENT_STATUS = {

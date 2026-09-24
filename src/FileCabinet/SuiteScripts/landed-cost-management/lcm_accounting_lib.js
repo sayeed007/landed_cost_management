@@ -17,6 +17,8 @@ define(
   const vendorDefaultsCache = {};
   const costItemMapDefaultsCache = {};
   const journalAccountCandidatesCache = {};
+  const inventoryDetailFlagsCache = {};
+  const defaultInventoryStatusCache = {};
 
   function toNumber(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -91,7 +93,7 @@ define(
         preview.skippedRows.push({
           id: row.id,
           reason: `Already created: ${row.createdTransactionType || 'Transaction'} ${
-            row.transactionNumber || row.createdTransactionId || ''
+            row.createdTransactionRefText || row.createdTransactionId || ''
           }${mode === MODES.bill && !row.costAllocatedInGrn ? '; pending landed-cost allocation' : ''}`,
         });
         return;
@@ -273,6 +275,8 @@ define(
       pendingBillRows: [],
       receiptItems: [],
       groups: [],
+      inventoryDetailRequirements: [],
+      shipmentNumber: '',
       skippedRows: [],
       errors: [],
     };
@@ -283,6 +287,7 @@ define(
     }
 
     assertParentAccessible(preview.parentId);
+    preview.shipmentNumber = getParentShipmentNumber(preview.parentId);
     const billRows = fetchLandedCostRows(preview.parentId).filter((row) => row.targetMode === MODES.bill);
     preview.createdBillRows = billRows.filter((row) => row.isCreated);
     preview.pendingBillRows = billRows.filter((row) => !row.isCreated);
@@ -365,6 +370,21 @@ define(
     }
 
     preview.groups = Object.keys(groupsByPo).map((poId) => groupsByPo[poId]);
+    if (!preview.errors.length) {
+      preview.groups
+        .filter((group) => group.action === 'Create')
+        .forEach((group) => {
+          const requirements = inspectItemReceiptInventoryDetails(group);
+          requirements.forEach((requirement) => {
+            requirement.autoReceiptInventoryNumber = requirement.isSerial
+              ? ''
+              : buildAutomaticReceiptInventoryNumber(preview.shipmentNumber, requirement);
+            getInventoryDetailAutomationErrors(requirement).forEach((error) => preview.errors.push(error));
+          });
+          group.inventoryDetailRequirements = requirements;
+          preview.inventoryDetailRequirements.push(...requirements);
+        });
+    }
     const actionableGroups = preview.groups.filter((group) => group.action !== 'Already received');
     if (!preview.errors.length && !actionableGroups.length) {
       preview.errors.push('Every LCM Item with a positive Quantity Receipt is already linked to an Item Receipt.');
@@ -385,7 +405,7 @@ define(
     // A source-line or Landed Cost form problem must not create a partial GRN run.
     const prepared = preview.groups
       .filter((group) => group.action === 'Create')
-      .map((group) => prepareItemReceipt(group, preview.parentId));
+      .map((group) => prepareItemReceipt(group, preview.parentId, preview.shipmentNumber));
     const created = [];
 
     preview.groups
@@ -448,6 +468,23 @@ define(
     });
   }
 
+  function getParentShipmentNumber(parentId) {
+    try {
+      const rec = record.load({
+        type: RECORDS.landedCostManagement,
+        id: parentId,
+        isDynamic: false,
+      });
+      return (
+        normalizeValue(getRecordValue(rec, 'name')).trim() ||
+        normalizeValue(getRecordValue(rec, FIELDS.landedCostManagement.shipmentNumber)).trim() ||
+        `LCM-${parentId}`
+      );
+    } catch (error) {
+      return `LCM-${parentId}`;
+    }
+  }
+
   function normalizeMode(modeInput) {
     const mode = normalizeChoice(modeInput);
     return mode === MODES.journal || mode === 'journalentry' ? MODES.journal : MODES.bill;
@@ -475,11 +512,10 @@ define(
       f.billItem,
       f.department,
       f.class,
-      f.location,
       f.memo,
-      f.transactionNumber,
       f.processingStatus,
       f.createdTransactionId,
+      f.createdTransactionRef,
       f.createdTransactionType,
       f.costAllocatedInGrn,
     ];
@@ -532,11 +568,10 @@ define(
           billItemText: getText(result, f.billItem),
           department: getValue(result, f.department),
           class: getValue(result, f.class),
-          location: getValue(result, f.location),
           memo: getValue(result, f.memo),
-          transactionNumber: getValue(result, f.transactionNumber),
           processingStatus: status,
           createdTransactionId,
+          createdTransactionRefText: getText(result, f.createdTransactionRef),
           createdTransactionType: getValue(result, f.createdTransactionType),
           costAllocatedInGrn: isChecked(getValue(result, f.costAllocatedInGrn)),
           isCreated: normalizeChoice(status) === normalizeChoice(STATUS.created) || Boolean(createdTransactionId),
@@ -892,56 +927,6 @@ define(
     }
   }
 
-  function getSelectedPurchaseOrderDefaults(poIdsInput) {
-    const poIds = normalizeIds(poIdsInput);
-    const headerLocations = lookupPurchaseOrderLocations(poIds, true);
-    const lineLocations = lookupPurchaseOrderLocations(poIds, false);
-
-    for (let index = 0; index < poIds.length; index += 1) {
-      const poId = poIds[index];
-      if (headerLocations[poId] && headerLocations[poId].location) return headerLocations[poId];
-      if (lineLocations[poId] && lineLocations[poId].location) return lineLocations[poId];
-    }
-
-    return { location: '', locationText: '' };
-  }
-
-  function lookupPurchaseOrderLocations(poIds, mainline) {
-    const locationsByPoId = {};
-    if (!poIds.length) return locationsByPoId;
-
-    try {
-      search
-        .create({
-          type: search.Type.PURCHASE_ORDER,
-          filters: [
-            ['internalid', 'anyof', poIds],
-            'AND',
-            ['mainline', 'is', mainline ? 'T' : 'F'],
-          ],
-          columns: ['internalid', 'location'],
-        })
-        .run()
-        .each((result) => {
-          const poId = normalizeValue(result.getValue({ name: 'internalid' }));
-          const location = normalizeValue(result.getValue({ name: 'location' }));
-          if (!poId || (locationsByPoId[poId] && locationsByPoId[poId].location)) return true;
-          locationsByPoId[poId] = {
-            location,
-            locationText: normalizeValue(result.getText({ name: 'location' })),
-          };
-          return true;
-        });
-    } catch (error) {
-      log.audit({
-        title: `LCM selected PO ${mainline ? 'header' : 'line'} location lookup failed`,
-        details: error.message || error,
-      });
-    }
-
-    return locationsByPoId;
-  }
-
   function isChecked(value) {
     return value === true || value === 'T' || value === 'true';
   }
@@ -1272,7 +1257,7 @@ define(
       transactionsByKey[key] = {
         id: row.createdTransactionId,
         type: row.createdTransactionType || getModeText(mode),
-        number: row.transactionNumber || row.createdTransactionId,
+        number: row.createdTransactionRefText || row.createdTransactionId,
       };
     });
     return transactionsByKey;
@@ -1744,7 +1729,6 @@ define(
     setCurrentIfPresent(bill, 'item', 'rate', row.amount);
     setCurrentIfPresent(bill, 'item', 'amount', row.amount);
     setCurrentIfPresent(bill, 'item', 'description', row.memo || row.costCategoryText);
-    setClassifications(bill, 'item', row);
     // Applied last, because NetSuite re-sources the line when item, rate or amount change.
     const problem = applyVendorBillCostLineIdentity(bill, row);
     if (problem) {
@@ -2095,7 +2079,6 @@ define(
     setJournalLineAccount(journal, row, side);
     setCurrentIfPresent(journal, 'line', side, row.amount);
     setCurrentIfPresent(journal, 'line', 'memo', row.memo || row.costCategoryText);
-    setClassifications(journal, 'line', row);
     journal.commitLine({ sublistId: 'line' });
   }
 
@@ -2302,13 +2285,24 @@ define(
     return result;
   }
 
-  function prepareItemReceipt(group, parentId) {
-    const receipt = record.transform({
+  function inspectItemReceiptInventoryDetails(group) {
+    const receipt = transformItemReceipt(group);
+    const receivedLines = configureItemReceiptLines(receipt, group);
+    return receivedLines
+      .map((entry) => getItemReceiptInventoryDetailRequirement(receipt, entry))
+      .filter(Boolean);
+  }
+
+  function transformItemReceipt(group) {
+    return record.transform({
       fromType: record.Type.PURCHASE_ORDER,
       fromId: group.purchaseOrderId,
       toType: record.Type.ITEM_RECEIPT,
       isDynamic: false,
     });
+  }
+
+  function configureItemReceiptLines(receipt, group) {
     const poLinesByKey = loadPurchaseOrderLineIndex(group.purchaseOrderId);
     const receiptLineCount = getLineCount(receipt, 'item');
     const usedReceiptLines = {};
@@ -2317,7 +2311,7 @@ define(
       receipt.setSublistValue({ sublistId: 'item', fieldId: 'itemreceive', line, value: false });
     }
 
-    (group.rows || []).forEach((row) => {
+    return (group.rows || []).map((row) => {
       const sourceLineKey = extractPoLineUniqueKey(group.purchaseOrderId, row.poLineKey);
       const sourceLine = sourceLineKey ? poLinesByKey[sourceLineKey] : null;
       if (!sourceLine) {
@@ -2346,7 +2340,122 @@ define(
       ) {
         throw new Error(`LCM Item ${row.id} could not set its receive quantity on the transformed Item Receipt.`);
       }
+      return { row, receiptLine };
     });
+  }
+
+  function getItemReceiptInventoryDetailRequirement(receipt, entry) {
+    if (!isChecked(getSublistValue(receipt, 'item', 'inventorydetailreq', entry.receiptLine))) return null;
+
+    const flags = getItemInventoryDetailFlags(entry.row.itemId);
+    const inventoryDetail = inspectInventoryAssignmentDetails(receipt, entry.receiptLine);
+    const mandatoryFields = inventoryDetail.mandatoryFields;
+    const kind = flags.isSerial ? 'Serial Number' : flags.isLot ? 'Lot Number' : flags.useBins ? 'Bin' : 'Inventory Detail';
+    return {
+      lcmItemId: String(entry.row.id),
+      purchaseOrderId: String(entry.row.purchaseOrderId),
+      purchaseOrderText: entry.row.purchaseOrderText || entry.row.purchaseOrderId,
+      itemId: String(entry.row.itemId),
+      itemText: entry.row.itemText || entry.row.itemId,
+      requiredQuantity: entry.row.quantity,
+      receiptLine: entry.receiptLine + 1,
+      locationId: normalizeValue(getSublistValue(receipt, 'item', 'location', entry.receiptLine)).trim(),
+      locationText: normalizeValue(getSublistText(receipt, 'item', 'location', entry.receiptLine)).trim(),
+      kind,
+      requiresReceiptInventoryNumber: flags.isSerial || flags.isLot || mandatoryFields.receiptInventoryNumber,
+      requiresBin: flags.useBins || mandatoryFields.binNumber,
+      requiresInventoryStatus: mandatoryFields.inventoryStatus,
+      requiresExpirationDate: mandatoryFields.expirationDate,
+      sourcedBinNumber: inventoryDetail.sourcedBinNumber,
+      sourcedInventoryStatus: inventoryDetail.sourcedInventoryStatus,
+      isSerial: flags.isSerial,
+    };
+  }
+
+  function inspectInventoryAssignmentDetails(receipt, receiptLine) {
+    const details = {
+      mandatoryFields: {
+        receiptInventoryNumber: false,
+        binNumber: false,
+        inventoryStatus: false,
+        expirationDate: false,
+      },
+      sourcedBinNumber: '',
+      sourcedInventoryStatus: '',
+    };
+    const detail = getSublistSubrecord(receipt, 'item', 'inventorydetail', receiptLine);
+    if (!detail) return details;
+
+    let insertedLine = false;
+    try {
+      if (!getLineCount(detail, 'inventoryassignment')) {
+        detail.insertLine({ sublistId: 'inventoryassignment', line: 0 });
+        insertedLine = true;
+      }
+      const fieldIds = {
+        receiptInventoryNumber: 'receiptinventorynumber',
+        binNumber: 'binnumber',
+        inventoryStatus: 'inventorystatus',
+        expirationDate: 'expirationdate',
+      };
+      Object.keys(fieldIds).forEach((key) => {
+        const field = getSublistField(detail, 'inventoryassignment', fieldIds[key], 0);
+        details.mandatoryFields[key] = Boolean(field && field.isMandatory);
+      });
+      // NetSuite can source a location's receiving Bin and Inventory Status on the transformed
+      // receipt. Preserve those values when replacing the assignment with LCM's automatic lot.
+      details.sourcedBinNumber = normalizeValue(getSublistValue(detail, 'inventoryassignment', 'binnumber', 0)).trim();
+      details.sourcedInventoryStatus = normalizeValue(
+        getSublistValue(detail, 'inventoryassignment', 'inventorystatus', 0)
+      ).trim();
+    } catch (error) {
+      // The transformed line remains authoritative for Inventory Detail itself.
+      // Item flags still cover lot, serial, and bin requirements when metadata is unavailable.
+    } finally {
+      if (insertedLine) {
+        try {
+          detail.removeLine({ sublistId: 'inventoryassignment', line: 0, ignoreRecalc: true });
+        } catch (error) {
+          // This preview-only transformed record is discarded after inspection.
+        }
+      }
+    }
+    return details;
+  }
+
+  function getItemInventoryDetailFlags(itemId) {
+    const key = normalizeValue(itemId).trim();
+    if (!key) return { isSerial: false, isLot: false, useBins: false };
+    if (inventoryDetailFlagsCache[key]) return inventoryDetailFlagsCache[key];
+
+    const fields = ['isserialitem', 'islotitem', 'usebins'];
+    const flags = { isSerial: false, isLot: false, useBins: false };
+    try {
+      const values = search.lookupFields({ type: 'item', id: key, columns: fields });
+      flags.isSerial = isChecked(values.isserialitem);
+      flags.isLot = isChecked(values.islotitem);
+      flags.useBins = isChecked(values.usebins);
+    } catch (error) {
+      // Some item types do not expose every flag. Read each available field independently.
+      fields.forEach((fieldId) => {
+        try {
+          const values = search.lookupFields({ type: 'item', id: key, columns: [fieldId] });
+          if (fieldId === 'isserialitem') flags.isSerial = isChecked(values[fieldId]);
+          if (fieldId === 'islotitem') flags.isLot = isChecked(values[fieldId]);
+          if (fieldId === 'usebins') flags.useBins = isChecked(values[fieldId]);
+        } catch (fieldError) {
+          // The transformed Item Receipt remains authoritative for whether detail is required.
+        }
+      });
+    }
+    inventoryDetailFlagsCache[key] = flags;
+    return flags;
+  }
+
+  function prepareItemReceipt(group, parentId, shipmentNumber) {
+    const receipt = transformItemReceipt(group);
+    const receivedLines = configureItemReceiptLines(receipt, group);
+    applyItemReceiptInventoryDetails(receipt, receivedLines, shipmentNumber, group.purchaseOrderText);
 
     const sourceKey = buildItemReceiptSourceKey(parentId, group.purchaseOrderId);
     setRequiredItemReceiptSourceKey(receipt, sourceKey, group.purchaseOrderText);
@@ -2360,6 +2469,251 @@ define(
         return makeTransactionResult('Item Receipt', record.Type.ITEM_RECEIPT, id, 'Created');
       },
     };
+  }
+
+  function applyItemReceiptInventoryDetails(receipt, receivedLines, shipmentNumber, purchaseOrderText) {
+    const requirementsByLcmItem = {};
+    (receivedLines || []).forEach((entry) => {
+      const requirement = getItemReceiptInventoryDetailRequirement(receipt, entry);
+      if (requirement) requirementsByLcmItem[requirement.lcmItemId] = requirement;
+    });
+    (receivedLines || []).forEach((entry) => {
+      const requirement = requirementsByLcmItem[String(entry.row.id)];
+      if (!requirement) return;
+
+      const assignment = buildAutomaticInventoryAssignment(requirement, shipmentNumber);
+      validateInventoryAssignments(requirement, [assignment], purchaseOrderText);
+      const detail = getSublistSubrecord(receipt, 'item', 'inventorydetail', entry.receiptLine);
+      if (!detail) {
+        throw new Error(
+          `LCM Item ${requirement.lcmItemId} (${requirement.itemText}) requires Inventory Detail, but the transformed Item Receipt does not expose the Inventory Detail subrecord.`
+        );
+      }
+
+      clearInventoryAssignments(detail);
+      detail.insertLine({ sublistId: 'inventoryassignment', line: 0 });
+      setInventoryAssignmentValue(detail, 'binnumber', assignment.binNumber, requirement, 0, requirement.requiresBin);
+      setInventoryAssignmentValue(
+        detail,
+        'inventorystatus',
+        assignment.inventoryStatus,
+        requirement,
+        0,
+        requirement.requiresInventoryStatus
+      );
+      setInventoryAssignmentValue(
+        detail,
+        'receiptinventorynumber',
+        assignment.receiptInventoryNumber,
+        requirement,
+        0,
+        requirement.requiresReceiptInventoryNumber
+      );
+      setInventoryAssignmentValue(
+        detail,
+        'expirationdate',
+        assignment.expirationDate,
+        requirement,
+        0,
+        requirement.requiresExpirationDate
+      );
+      setInventoryAssignmentValue(detail, 'quantity', assignment.quantity, requirement, 0, true);
+    });
+  }
+
+  function buildAutomaticInventoryAssignment(requirement, shipmentNumber) {
+    const errors = getInventoryDetailAutomationErrors(requirement);
+    if (errors.length) throw new Error(errors.join('\n'));
+    return {
+      receiptInventoryNumber: requirement.requiresReceiptInventoryNumber
+        ? buildAutomaticReceiptInventoryNumber(shipmentNumber, requirement)
+        : '',
+      binNumber: getAutomaticInventoryDetailValue('sourcedBinNumber', 'receivingBinByLocation', requirement),
+      inventoryStatus: getAutomaticInventoryDetailValue(
+        'sourcedInventoryStatus',
+        'receivingInventoryStatusByLocation',
+        requirement
+      ),
+      expirationDate: '',
+      quantity: requirement.requiredQuantity,
+    };
+  }
+
+  function getInventoryDetailAutomationErrors(requirement) {
+    const itemLabel = `LCM Item ${requirement.lcmItemId} (${requirement.itemText})`;
+    if (requirement.isSerial) {
+      return [`${itemLabel} is serialized. Create Item Receipt will not invent physical serial numbers.`];
+    }
+    if (requirement.requiresExpirationDate) {
+      return [`${itemLabel} requires an Expiration Date. Automatic Item Receipt cannot invent supplier expiry data.`];
+    }
+    const errors = [];
+    if (requirement.requiresBin && !getAutomaticInventoryDetailValue('sourcedBinNumber', 'receivingBinByLocation', requirement)) {
+      errors.push(`${itemLabel} requires a Bin Number, but NetSuite did not source one and no receiving bin is configured for ${inventoryDetailLocationText(requirement)}.`);
+    }
+    if (
+      requirement.requiresInventoryStatus &&
+      !getAutomaticInventoryDetailValue('sourcedInventoryStatus', 'receivingInventoryStatusByLocation', requirement)
+    ) {
+      errors.push(`${itemLabel} requires an Inventory Status, but NetSuite did not source one and no receiving status is configured for ${inventoryDetailLocationText(requirement)}.`);
+    }
+    return errors;
+  }
+
+  function getAutomaticInventoryDetailValue(sourcedField, configuredType, requirement) {
+    const sourcedValue = normalizeValue(requirement[sourcedField]).trim();
+    if (sourcedValue) return sourcedValue;
+    if (configuredType === 'receivingInventoryStatusByLocation') {
+      const defaultStatus = getDefaultInventoryStatusId();
+      if (defaultStatus) return defaultStatus;
+    }
+    return getConfiguredReceivingInventoryDetailValue(configuredType, requirement);
+  }
+
+  function getDefaultInventoryStatusId() {
+    const cacheKey = 'default';
+    if (Object.prototype.hasOwnProperty.call(defaultInventoryStatusCache, cacheKey)) {
+      return defaultInventoryStatusCache[cacheKey];
+    }
+
+    let defaultStatusId = '';
+    try {
+      const defaultStatus = search
+        .create({
+          type: 'inventorystatus',
+          filters: [
+            ['isinactive', 'is', 'F'],
+            'AND',
+            ['isdefault', 'is', 'T'],
+          ],
+          columns: [search.createColumn({ name: 'internalid', sort: search.Sort.ASC })],
+        })
+        .run()
+        .getRange({ start: 0, end: 1 });
+      if (defaultStatus && defaultStatus.length) {
+        defaultStatusId = normalizeValue(defaultStatus[0].getValue({ name: 'internalid' })).trim();
+      }
+    } catch (error) {
+      // Some account forms do not expose isdefault to N/search. The standard default Inventory
+      // Status is the earliest active status, and custom statuses are created after it.
+      try {
+        const activeStatuses = search
+          .create({
+            type: 'inventorystatus',
+            filters: [['isinactive', 'is', 'F']],
+            columns: [search.createColumn({ name: 'internalid', sort: search.Sort.ASC })],
+          })
+          .run()
+          .getRange({ start: 0, end: 1 });
+        if (activeStatuses && activeStatuses.length) {
+          defaultStatusId = normalizeValue(activeStatuses[0].getValue({ name: 'internalid' })).trim();
+        }
+      } catch (fallbackError) {
+        // The optional per-location configuration remains available when account lookup is unavailable.
+      }
+    }
+    defaultInventoryStatusCache[cacheKey] = defaultStatusId;
+    return defaultStatusId;
+  }
+
+  function getConfiguredReceivingInventoryDetailValue(type, requirement) {
+    const itemReceiptDefaults = DEFAULTS.itemReceipt || {};
+    const values = itemReceiptDefaults[type] || {};
+    return normalizeValue(values[requirement.locationId] || values.default).trim();
+  }
+
+  function inventoryDetailLocationText(requirement) {
+    return requirement.locationText || (requirement.locationId ? `Location ${requirement.locationId}` : 'the receipt location');
+  }
+
+  function buildAutomaticReceiptInventoryNumber(shipmentNumber, requirement) {
+    const shipmentPart = normalizeValue(shipmentNumber).trim() || `LCM-${requirement.lcmItemId}`;
+    const itemPart = normalizeValue(requirement.itemText).trim() || `ITEM-${requirement.itemId}`;
+    return `${shipmentPart}-${itemPart}`.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  }
+
+  function validateInventoryAssignments(requirement, assignments, purchaseOrderText) {
+    const itemLabel = `LCM Item ${requirement.lcmItemId} (${requirement.itemText}) on PO ${purchaseOrderText}`;
+    if (!assignments.length) {
+      throw new Error(
+        `${itemLabel} requires ${requirement.kind} Inventory Detail. Add assignment rows in the Item Receipt preview before confirming.`
+      );
+    }
+
+    const assignedQuantity = assignments.reduce((total, assignment) => total + (toNumber(assignment.quantity) || 0), 0);
+    if (Math.abs(assignedQuantity - requirement.requiredQuantity) > 0.000001) {
+      throw new Error(
+        `${itemLabel} has Inventory Detail quantity ${assignedQuantity}, but its Quantity Receipt is ${requirement.requiredQuantity}. The assignment total must match exactly.`
+      );
+    }
+    if (assignments.some((assignment) => !toNumber(assignment.quantity) || toNumber(assignment.quantity) <= 0)) {
+      throw new Error(`${itemLabel} has an Inventory Detail assignment with a missing or non-positive quantity.`);
+    }
+    if (requirement.requiresReceiptInventoryNumber && assignments.some((assignment) => !normalizeValue(assignment.receiptInventoryNumber).trim())) {
+      throw new Error(`${itemLabel} requires a Receipt Inventory Number for every Inventory Detail assignment.`);
+    }
+    if (requirement.requiresBin && assignments.some((assignment) => !normalizeValue(assignment.binNumber).trim())) {
+      throw new Error(`${itemLabel} requires a Bin Number for every Inventory Detail assignment.`);
+    }
+    if (requirement.requiresInventoryStatus && assignments.some((assignment) => !normalizeValue(assignment.inventoryStatus).trim())) {
+      throw new Error(`${itemLabel} requires an Inventory Status for every Inventory Detail assignment.`);
+    }
+    if (requirement.requiresExpirationDate && assignments.some((assignment) => !normalizeValue(assignment.expirationDate).trim())) {
+      throw new Error(`${itemLabel} requires an Expiration Date for every Inventory Detail assignment.`);
+    }
+    if (requirement.isSerial && assignments.some((assignment) => Math.abs((toNumber(assignment.quantity) || 0) - 1) > 0.000001)) {
+      throw new Error(`${itemLabel} is serialized. Enter one assignment per serial number with Quantity 1.`);
+    }
+    if (requirement.isSerial) {
+      const serials = assignments.map((assignment) => normalizeValue(assignment.receiptInventoryNumber).trim());
+      if (uniqueIds(serials).length !== serials.length) {
+        throw new Error(`${itemLabel} has duplicate serial numbers in its Inventory Detail assignments.`);
+      }
+    }
+  }
+
+  function clearInventoryAssignments(detail) {
+    for (let line = getLineCount(detail, 'inventoryassignment') - 1; line >= 0; line -= 1) {
+      detail.removeLine({ sublistId: 'inventoryassignment', line, ignoreRecalc: true });
+    }
+  }
+
+  function setInventoryAssignmentValue(detail, fieldId, value, requirement, line, required) {
+    const normalized = normalizeValue(value).trim();
+    if (!normalized && !required) return;
+    if (!normalized && required) {
+      throw new Error(`LCM Item ${requirement.lcmItemId} is missing required Inventory Detail ${fieldId} on assignment ${line + 1}.`);
+    }
+    try {
+      detail.setSublistValue({
+        sublistId: 'inventoryassignment',
+        fieldId,
+        line,
+        value: fieldId === 'expirationdate' ? toDateObject(value) : value,
+      });
+    } catch (error) {
+      throw new Error(
+        `LCM Item ${requirement.lcmItemId} could not set Inventory Detail ${fieldId} on assignment ${line + 1}: ${
+          error.message || error
+        }`
+      );
+    }
+  }
+
+  function getSublistSubrecord(rec, sublistId, fieldId, line) {
+    try {
+      return rec.getSublistSubrecord({ sublistId, fieldId, line });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getSublistField(rec, sublistId, fieldId, line) {
+    try {
+      return rec.getSublistField({ sublistId, fieldId, line });
+    } catch (error) {
+      return null;
+    }
   }
 
   function loadPurchaseOrderLineIndex(purchaseOrderId) {
@@ -2636,8 +2990,6 @@ define(
           [f.createdTransactionId]: String(transaction.id),
           [f.createdTransactionRef]: String(transaction.id),
           [f.createdTransactionType]: transaction.label,
-          [f.transactionNumber]: transaction.tranid || String(transaction.id),
-          [f.createdDate]: new Date(),
         },
         options: { enableSourcing: true, ignoreMandatoryFields: true },
       });
@@ -2683,10 +3035,6 @@ define(
     } catch (error) {
       return String(id);
     }
-  }
-
-  function setClassifications(rec, sublistId, row) {
-    setCurrentIfPresent(rec, sublistId, 'location', row.location);
   }
 
   function setIfPresent(rec, fieldId, value) {
@@ -2764,7 +3112,6 @@ define(
     fetchLandedCostRows,
     getAllocationMethodDefault,
     getCostItemMapDefaults,
-    getSelectedPurchaseOrderDefaults,
     getVendorBillDefaults,
     getVendorCurrencyDefaults,
     getVendorDefaults,

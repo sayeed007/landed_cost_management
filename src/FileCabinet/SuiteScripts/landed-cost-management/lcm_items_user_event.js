@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/record', './lcm_po_selection_config', './lcm_shipment_status_lib'], (error, record, config, shipmentStatus) => {
+define(['N/error', 'N/record', 'N/runtime', './lcm_po_selection_config', './lcm_shipment_status_lib'], (error, record, runtime, config, shipmentStatus) => {
   const { FIELDS } = config;
 
   function beforeSubmit(context) {
@@ -12,6 +12,7 @@ define(['N/error', 'N/record', './lcm_po_selection_config', './lcm_shipment_stat
     const f = FIELDS.lcmItems;
     const changedFields = getChangedFieldMap(rec);
     const xedit = isXedit(context);
+    assertReceivingLocationIsSourced(context, f, changedFields);
     assertReceiptFieldsAreLocked(context, f, changedFields);
 
     // An xedit newRecord contains only the submitted fields. Load the persisted row and
@@ -121,6 +122,35 @@ define(['N/error', 'N/record', './lcm_po_selection_config', './lcm_shipment_stat
       message: 'This LCM Item is linked to an Item Receipt and its PO, item, receipt quantity, tracking, and Item Receipt reference cannot be changed.',
       notifyOff: false,
     });
+  }
+
+  function assertReceivingLocationIsSourced(context, f, changedFields) {
+    const receivingLocationChanged = hasFieldChanged(context, f.receivingLocation, changedFields);
+    if (!receivingLocationChanged) return;
+    if (isLcmSynchronization(context, f, changedFields)) return;
+
+    throw error.create({
+      name: 'LCM_RECEIVING_LOCATION_SOURCED',
+      message: 'Receiving Location is sourced from the Purchase Order and cannot be edited directly.',
+      notifyOff: false,
+    });
+  }
+
+  function hasFieldChanged(context, fieldId, changedFields) {
+    if (isXedit(context)) return Boolean(changedFields[fieldId]);
+    if (!context.oldRecord) return Boolean(getValue(context.newRecord, fieldId));
+    return normalizeValue(getValue(context.newRecord, fieldId)) !== normalizeValue(getValue(context.oldRecord, fieldId));
+  }
+
+  function isLcmSynchronization(context, f, changedFields) {
+    try {
+      if (runtime.executionContext === runtime.ContextType.USEREVENT) return true;
+    } catch (error) {
+      // A submitFields call made while a root User Event is rendering can retain
+      // the outer UI context. It is still an XEDIT with only this system field.
+    }
+
+    return isXedit(context) && Object.keys(changedFields).length === 1 && Boolean(changedFields[f.receivingLocation]);
   }
 
   function normalizeValue(value) {
