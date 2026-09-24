@@ -1163,15 +1163,30 @@ define(
         return;
       }
 
-      compareVendorBillRouting(row, target, `Vendor Bill ${target.number || targetId}`).forEach((message) =>
-        errors.push(`Line ${row.id}: ${message}`)
-      );
+      compareVendorBillRouting(row, target, `Vendor Bill ${target.number || targetId}`, {
+        compareAllocationMethod: false,
+      }).forEach((message) => errors.push(`Line ${row.id}: ${message}`));
+
+      const rowMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
+      const targetMethod = getVendorBillLandedCostMethodText(target.allocationMethodText);
+      if (rowMethod !== targetMethod) {
+        if (canRepairOwnedVendorBillAllocationMethod(targetId, rowMethod, ownedRows)) {
+          log.audit({
+            title: 'LCM Vendor Bill allocation method repair scheduled',
+            details:
+              `Line ${row.id} will correct Vendor Bill ${target.number || targetId} from ${targetMethod} to ${rowMethod}. ` +
+              'The Bill contains only this LCM record\'s compatible marked cost lines.',
+          });
+        } else {
+          errors.push(`Line ${row.id}: Allocation Method ${rowMethod} must match Vendor Bill ${target.number || targetId} (${targetMethod}).`);
+        }
+      }
     });
 
     return errors;
   }
 
-  function compareVendorBillRouting(row, target, targetLabel) {
+  function compareVendorBillRouting(row, target, targetLabel, options) {
     const mismatches = [];
     [
       ['Vendor', row.vendor, target.vendor],
@@ -1183,12 +1198,50 @@ define(
       }
     });
 
-    const rowMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
-    const targetMethod = getVendorBillLandedCostMethodText(target.allocationMethodText);
-    if (rowMethod !== targetMethod) {
-      mismatches.push(`Allocation Method ${rowMethod} must match ${targetLabel} (${targetMethod}).`);
+    if (!options || options.compareAllocationMethod !== false) {
+      const rowMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
+      const targetMethod = getVendorBillLandedCostMethodText(target.allocationMethodText);
+      if (rowMethod !== targetMethod) {
+        mismatches.push(`Allocation Method ${rowMethod} must match ${targetLabel} (${targetMethod}).`);
+      }
     }
     return mismatches;
+  }
+
+  // A Bill header can retain the account default even though the LCM source rows and their
+  // marked cost lines all carry another method. Repair that known stale default only where the
+  // Bill is entirely this LCM record's own, compatible output. A manual or foreign line keeps
+  // the normal strict routing rejection intact.
+  function canRepairOwnedVendorBillAllocationMethod(targetId, expectedMethod, ownedRows) {
+    const rows = (ownedRows || []).filter((row) => row && row.targetMode === MODES.bill);
+    if (!rows.length || rows.some((row) => getVendorBillLandedCostMethodText(row.allocationMethodText) !== expectedMethod)) {
+      return false;
+    }
+
+    const expectedMarkers = {};
+    rows.forEach((row) => {
+      const marker = buildVendorBillSourceKey(row);
+      if (marker) expectedMarkers[marker] = true;
+    });
+    if (!Object.keys(expectedMarkers).length) return false;
+
+    try {
+      const bill = record.load({ type: record.Type.VENDOR_BILL, id: targetId, isDynamic: false });
+      const lineCount = getLineCount(bill, 'item');
+      if (!lineCount) return false;
+
+      for (let line = 0; line < lineCount; line += 1) {
+        const marker = getVendorBillLineSourceKey(bill, line);
+        if (!marker || !expectedMarkers[marker]) return false;
+      }
+      return true;
+    } catch (error) {
+      log.audit({
+        title: 'LCM Vendor Bill allocation method repair check failed',
+        details: `Vendor Bill ${targetId}: ${error.message || error}`,
+      });
+      return false;
+    }
   }
 
   function loadVendorBillRoutingTarget(id) {
@@ -1497,6 +1550,16 @@ define(
     return {
       group,
       save() {
+        // Line and summary writes can source body defaults. Write and verify the method as the
+        // final in-memory mutation before save so NetSuite cannot silently retain Weight/Value
+        // from the transaction form instead of the LCM row's effective method.
+        if (costLines.length && !setVendorBillLandedCostMethod(bill, firstRow.allocationMethodText)) {
+          throw new Error(
+            `Vendor Bill Cost Allocation Method could not be set to ${getVendorBillLandedCostMethodText(
+              firstRow.allocationMethodText
+            )}. No transaction was saved.`
+          );
+        }
         const id = bill.save({ enableSourcing: true, ignoreMandatoryFields: false });
         return makeTransactionResult(
           'Vendor Bill',
@@ -1999,38 +2062,35 @@ define(
     const methodText = getVendorBillLandedCostMethodText(allocationMethodText);
     if (!methodText) return false;
     const fieldIds = getVendorBillLandedCostMethodFieldIds();
-    let firstError = null;
+    const values = getVendorBillLandedCostMethodValues(methodText);
+    const attempts = [];
 
     for (let fieldIndex = 0; fieldIndex < fieldIds.length; fieldIndex += 1) {
       const fieldId = fieldIds[fieldIndex];
-      try {
-        bill.setText({
-          fieldId,
-          text: methodText,
-        });
-        return true;
-      } catch (textError) {
-        if (!firstError) firstError = textError;
-        const values = getVendorBillLandedCostMethodValues(methodText);
-        for (let index = 0; index < values.length; index += 1) {
-          try {
-            bill.setValue({
-              fieldId,
-              value: values[index],
-            });
-            return true;
-          } catch (valueError) {
-            // Try the next known NetSuite representation for this standard select field.
-          }
+      for (let index = 0; index < values.length; index += 1) {
+        try {
+          bill.setValue({ fieldId, value: values[index] });
+          const applied = getVendorBillLandedCostMethodText(getVendorBillLandedCostMethodTextFromRecord(bill));
+          attempts.push(`${fieldId}=${values[index]} -> ${applied || '(blank)'}`);
+          if (applied === methodText) return true;
+        } catch (valueError) {
+          attempts.push(`${fieldId}=${values[index]} rejected: ${valueError.message || valueError}`);
         }
+      }
+
+      try {
+        bill.setText({ fieldId, text: methodText });
+        const applied = getVendorBillLandedCostMethodText(getVendorBillLandedCostMethodTextFromRecord(bill));
+        attempts.push(`${fieldId} text ${methodText} -> ${applied || '(blank)'}`);
+        if (applied === methodText) return true;
+      } catch (textError) {
+        attempts.push(`${fieldId} text ${methodText} rejected: ${textError.message || textError}`);
       }
     }
 
-    log.audit({
+    log.error({
       title: 'LCM landed cost allocation method not applied',
-      details: `Tried ${fieldIds.join(', ')} with "${methodText}". ${
-        (firstError && firstError.message) || 'Field is not exposed on this Vendor Bill form.'
-      }`,
+      details: `Tried ${fieldIds.join(', ')} with "${methodText}". ${attempts.join('; ') || 'Field is not exposed on this Vendor Bill form.'}`,
     });
     return false;
   }
@@ -2057,8 +2117,12 @@ define(
     // Cost Allocation Method describes how the tagged cost lines spread, so it is set as soon
     // as any line carries a Cost Category - not only when this Bill also carries the goods.
     const hasCostLines = (costLines || []).length > 0;
-    if (hasCostLines) {
-      setVendorBillLandedCostMethod(bill, allocationMethodText);
+    if (hasCostLines && !setVendorBillLandedCostMethod(bill, allocationMethodText)) {
+      throw new Error(
+        `Vendor Bill Cost Allocation Method could not be set to ${getVendorBillLandedCostMethodText(
+          allocationMethodText
+        )}. No transaction was saved.`
+      );
     }
 
     // The Landed Cost subtab summary (Source/Amount per category) only means anything when the
