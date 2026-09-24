@@ -118,6 +118,10 @@ define(
       );
     }
 
+    if (mode === MODES.bill && preview.eligibleRows.length) {
+      validateVendorBillRouting(preview.eligibleRows, createdRows).forEach((routingError) => preview.errors.push(routingError));
+    }
+
     preview.groups = groupRows(preview.eligibleRows, mode, createdRows);
     if (mode === MODES.bill) {
       findAllocationMethodConflicts(preview.groups).forEach((conflict) => preview.errors.push(conflict));
@@ -202,8 +206,8 @@ define(
     return new Error(
       `${preamble}\n\nThe ${alreadySaved.length} transaction(s) saved before it were kept: ` +
         `${alreadySaved.map((transaction) => `${transaction.label} ${transaction.tranid || transaction.id}`).join(', ')}. ` +
-        'Their Landed Cost rows are marked Created, so re-running this action will append to them ' +
-        `rather than duplicate them, and will retry the remaining ${total - index} transaction(s).\n${detail}`
+        'Their Landed Cost rows are marked Created. Correct the remaining Landed Cost routing, then re-run this action; ' +
+        `remaining rows will follow their explicit Bill target or Bill Group without duplicating the saved rows.\n${detail}`
     );
   }
 
@@ -513,6 +517,9 @@ define(
       f.department,
       f.class,
       f.memo,
+      f.appendExistingBill,
+      f.targetVendorBill,
+      f.billGroup,
       f.processingStatus,
       f.createdTransactionId,
       f.createdTransactionRef,
@@ -569,6 +576,10 @@ define(
           department: getValue(result, f.department),
           class: getValue(result, f.class),
           memo: getValue(result, f.memo),
+          appendExistingBill: isChecked(getValue(result, f.appendExistingBill)),
+          targetVendorBillId: getValue(result, f.targetVendorBill),
+          targetVendorBillText: getText(result, f.targetVendorBill),
+          billGroup: normalizeValue(getValue(result, f.billGroup)).trim(),
           processingStatus: status,
           createdTransactionId,
           createdTransactionRefText: getText(result, f.createdTransactionRef),
@@ -1069,6 +1080,15 @@ define(
     if (!row.subsidiary) errors.push('Subsidiary is required');
     if (mode === MODES.bill) {
       if (!row.vendor) errors.push('Vendor is required for Vendor Bill');
+      if (row.appendExistingBill && !row.targetVendorBillId) {
+        errors.push('Target Vendor Bill is required when Append to Existing Bill is checked');
+      }
+      if (row.appendExistingBill && row.billGroup) {
+        errors.push('Bill Group must be blank when Append to Existing Bill is checked');
+      }
+      if (!row.appendExistingBill && row.targetVendorBillId) {
+        errors.push('Target Vendor Bill requires Append to Existing Bill to be checked');
+      }
       if (!row.costItemMap) {
         errors.push('LC Cost Category is required');
       } else if (!row.costItemMapMatched) {
@@ -1099,13 +1119,121 @@ define(
     return errors;
   }
 
+  // An append is never inferred from the first compatible Bill. A source row either names the
+  // Bill it is allowed to update, names a pending Bill Group, or remains a standalone new Bill.
+  // The target check deliberately does not compare LC Cost Category or LC Cost Item: one Bill
+  // can hold different charge categories, and line-level merging handles compatible rows later.
+  function validateVendorBillRouting(rows, createdRows) {
+    const errors = [];
+    const createdByTransactionId = {};
+    const targetCache = {};
+
+    (createdRows || []).forEach((createdRow) => {
+      if (!createdRow.createdTransactionId || createdRow.targetMode !== MODES.bill) return;
+      const id = String(createdRow.createdTransactionId);
+      if (!createdByTransactionId[id]) createdByTransactionId[id] = [];
+      createdByTransactionId[id].push(createdRow);
+    });
+
+    (rows || []).forEach((row) => {
+      if (!row.appendExistingBill) return;
+      const targetId = normalizeValue(row.targetVendorBillId).trim();
+      if (!targetId) return;
+
+      const ownedRows = createdByTransactionId[targetId] || [];
+      if (!ownedRows.length) {
+        errors.push(
+          `Line ${row.id}: Target Vendor Bill ${row.targetVendorBillText || targetId} was not created by this Landed Cost Management record.`
+        );
+        return;
+      }
+
+      const sourceRow = ownedRows[0];
+      const sourceErrors = compareVendorBillRouting(row, sourceRow, `created source row ${sourceRow.id}`);
+      sourceErrors.forEach((message) => errors.push(`Line ${row.id}: ${message}`));
+
+      if (!targetCache[targetId]) targetCache[targetId] = loadVendorBillRoutingTarget(targetId);
+      const target = targetCache[targetId];
+      if (target.error) {
+        errors.push(`Line ${row.id}: Target Vendor Bill ${row.targetVendorBillText || targetId} is not editable: ${target.error}`);
+        return;
+      }
+      if (target.closed) {
+        errors.push(`Line ${row.id}: Target Vendor Bill ${target.number || targetId} is ${target.status || 'not editable'}.`);
+        return;
+      }
+
+      compareVendorBillRouting(row, target, `Vendor Bill ${target.number || targetId}`).forEach((message) =>
+        errors.push(`Line ${row.id}: ${message}`)
+      );
+    });
+
+    return errors;
+  }
+
+  function compareVendorBillRouting(row, target, targetLabel) {
+    const mismatches = [];
+    [
+      ['Vendor', row.vendor, target.vendor],
+      ['Subsidiary', row.subsidiary, target.subsidiary],
+      ['Currency', row.currency, target.currency],
+    ].forEach(([label, actual, expected]) => {
+      if (normalizeValue(actual).trim() !== normalizeValue(expected).trim()) {
+        mismatches.push(`${label} must match ${targetLabel}.`);
+      }
+    });
+
+    const rowMethod = getVendorBillLandedCostMethodText(row.allocationMethodText);
+    const targetMethod = getVendorBillLandedCostMethodText(target.allocationMethodText);
+    if (rowMethod !== targetMethod) {
+      mismatches.push(`Allocation Method ${rowMethod} must match ${targetLabel} (${targetMethod}).`);
+    }
+    return mismatches;
+  }
+
+  function loadVendorBillRoutingTarget(id) {
+    try {
+      const bill = record.load({ type: record.Type.VENDOR_BILL, id, isDynamic: false });
+      const status = getRecordText(bill, 'status') || getRecordValue(bill, 'statusref') || getRecordValue(bill, 'status');
+      const statusKey = normalizeChoice(status);
+      return {
+        vendor: getRecordValue(bill, 'entity'),
+        subsidiary: getRecordValue(bill, 'subsidiary'),
+        currency: getRecordValue(bill, 'currency'),
+        allocationMethodText: getVendorBillLandedCostMethodText(getVendorBillLandedCostMethodTextFromRecord(bill)),
+        number: getRecordValue(bill, 'tranid') || String(id),
+        status,
+        closed:
+          isChecked(getRecordValue(bill, 'voided')) ||
+          statusKey.indexOf('paidinfull') >= 0 ||
+          statusKey.indexOf('closed') >= 0 ||
+          statusKey.indexOf('void') >= 0 ||
+          statusKey.indexOf('cancel') >= 0,
+      };
+    } catch (error) {
+      return { error: error.message || error };
+    }
+  }
+
+  function getVendorBillLandedCostMethodTextFromRecord(bill) {
+    const fieldIds = getVendorBillLandedCostMethodFieldIds();
+    for (let index = 0; index < fieldIds.length; index += 1) {
+      const fieldId = fieldIds[index];
+      const text = getRecordText(bill, fieldId);
+      if (text) return text;
+      const value = getRecordValue(bill, fieldId);
+      if (value) return value;
+    }
+    return '';
+  }
+
   function groupRows(rows, mode, createdRows) {
     const groupsByKey = {};
-    const existingTransactionsByKey = buildExistingTransactionsByKey(createdRows || [], mode);
+    const existingTransactionsByKey = mode === MODES.journal ? buildExistingTransactionsByKey(createdRows || [], mode) : {};
     rows.forEach((row) => {
-      const key = buildGroupKey(row, mode);
+      const routing = mode === MODES.bill ? resolveVendorBillRouting(row) : resolveJournalRouting(row, existingTransactionsByKey);
+      const key = routing.key;
       if (!groupsByKey[key]) {
-        const existingTransaction = existingTransactionsByKey[key] || {};
         groupsByKey[key] = {
           key,
           mode,
@@ -1117,14 +1245,14 @@ define(
           billTypeText: DEFAULTS.billTypeText,
           currency: row.currency,
           currencyText: row.currencyText,
-          createdTransactionId: existingTransaction.id || '',
-          createdTransactionType: existingTransaction.type || '',
-          transactionNumber: existingTransaction.number || '',
-          actionText: existingTransaction.id
-            ? `Append to ${existingTransaction.type || 'Transaction'} ${existingTransaction.number || existingTransaction.id}`
-            : 'Create new transaction',
+          createdTransactionId: routing.createdTransactionId || '',
+          createdTransactionType: routing.createdTransactionType || '',
+          transactionNumber: routing.transactionNumber || '',
+          actionText: routing.actionText,
+          routeText: routing.routeText,
+          billGroup: routing.billGroup || '',
           rows: [],
-          existingRows: (createdRows || []).filter((createdRow) => buildGroupKey(createdRow, mode) === key),
+          existingRows: (createdRows || []).filter((createdRow) => routing.matchesCreatedRow(createdRow)),
           amount: 0,
         };
       }
@@ -1150,22 +1278,77 @@ define(
         allocationMethodText: getVendorBillLandedCostMethodText(merged.allocationMethodText),
         amount: merged.amount,
         lineKey: merged.lineKey,
+        routeText: group.routeText,
       }));
       return group;
     });
   }
 
-  // Cost Allocation Method is a BODY field on a Vendor Bill, but Bills are grouped by vendor,
-  // subsidiary and currency only. Rows that disagree about the method therefore cannot be
-  // represented on one Bill: whichever method is written to the header governs every cost
-  // line on it, including the lines that asked for the other one. Splitting the lines does
-  // not fix that, so the mismatch is refused in the preview instead of being written out.
+  function resolveVendorBillRouting(row) {
+    const header = [row.vendor, row.subsidiary, row.currency];
+    if (row.appendExistingBill) {
+      const targetId = normalizeValue(row.targetVendorBillId).trim();
+      const targetNumber = row.targetVendorBillText || targetId;
+      return {
+        key: JSON.stringify(['bill', 'append', targetId]),
+        createdTransactionId: targetId,
+        createdTransactionType: 'Vendor Bill',
+        transactionNumber: targetNumber,
+        actionText: `Append to Vendor Bill ${targetNumber}`,
+        routeText: `Append target: Vendor Bill ${targetNumber}`,
+        matchesCreatedRow: (createdRow) => String(createdRow.createdTransactionId || '') === targetId,
+      };
+    }
+
+    const billGroup = normalizeBillGroup(row.billGroup);
+    if (billGroup.key) {
+      return {
+        key: JSON.stringify(['bill', 'new-group'].concat(header, [billGroup.key])),
+        actionText: `Create new Vendor Bill for Bill Group "${billGroup.text}"`,
+        routeText: `New Bill Group: ${billGroup.text}`,
+        billGroup: billGroup.text,
+        matchesCreatedRow: () => false,
+      };
+    }
+
+    return {
+      key: JSON.stringify(['bill', 'standalone'].concat(header, [String(row.id || '')])),
+      actionText: 'Create separate new Vendor Bill',
+      routeText: 'Standalone new Vendor Bill',
+      matchesCreatedRow: () => false,
+    };
+  }
+
+  function resolveJournalRouting(row, existingTransactionsByKey) {
+    const key = buildGroupKey(row, MODES.journal);
+    const existingTransaction = existingTransactionsByKey[key] || {};
+    return {
+      key,
+      createdTransactionId: existingTransaction.id || '',
+      createdTransactionType: existingTransaction.type || '',
+      transactionNumber: existingTransaction.number || '',
+      actionText: existingTransaction.id
+        ? `Append to ${existingTransaction.type || 'Transaction'} ${existingTransaction.number || existingTransaction.id}`
+        : 'Create new transaction',
+      routeText: 'Journal routing is unchanged',
+      matchesCreatedRow: (createdRow) => buildGroupKey(createdRow, MODES.journal) === key,
+    };
+  }
+
+  function normalizeBillGroup(value) {
+    const text = normalizeValue(value).trim().replace(/\s+/g, ' ');
+    return { text, key: text.toLowerCase() };
+  }
+
+  // Cost Allocation Method is a BODY field on a Vendor Bill. A shared Bill Group or explicit
+  // target cannot carry conflicting methods, so reject the destination rather than quietly
+  // splitting it or writing a header that misdescribes a source row.
   function findAllocationMethodConflicts(groups) {
     const conflicts = [];
     (groups || []).forEach((group) => {
       const conflict = describeAllocationMethodConflict((group.rows || []).concat(group.existingRows || []));
       if (!conflict) return;
-      conflicts.push(`${group.vendorText || group.vendor} / ${group.currencyText || group.currency}: ${conflict}`);
+      conflicts.push(`${group.routeText || group.key}: ${conflict}`);
     });
     return conflicts;
   }
@@ -1183,8 +1366,7 @@ define(
     return (
       'a Vendor Bill has one Cost Allocation Method, but these Landed Cost rows ask for ' +
       `${methods.map((method) => `${method} (row ${rowIdsByMethod[method].join(', ')})`).join(' and ')}. ` +
-      'Set one Allocation Method for this vendor/currency, or move the differing rows onto their own ' +
-      'LCM record so they get their own Vendor Bill.'
+      'Set one Allocation Method for this Bill Group or route the differing rows to separate Vendor Bills.'
     );
   }
 
@@ -1240,12 +1422,7 @@ define(
   }
 
   function buildGroupKey(row, mode) {
-    // A Vendor Bill has one currency and one header exchange rate. Source row rates are still
-    // applied independently during base-currency GRN allocation, so rate differences must not
-    // create duplicate same-vendor/same-currency bills.
-    return mode === MODES.bill
-      ? [row.vendor, row.subsidiary, row.currency].join('|')
-      : [row.subsidiary, row.currency].join('|');
+    return [row.subsidiary, row.currency].join('|');
   }
 
   function buildExistingTransactionsByKey(rows, mode) {

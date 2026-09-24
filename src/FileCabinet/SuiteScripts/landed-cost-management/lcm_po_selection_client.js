@@ -19,6 +19,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
       exposeWindowCallbacks();
       announceClientLoad(currentRecord.get());
       applyLandedCostLineDefaults(currentRecord.get(), '');
+      syncLandedCostBillRouting(currentRecord.get(), '');
       syncCostCategoryDefaults(currentRecord.get(), '');
     } catch (error) {
       log.error({
@@ -37,6 +38,7 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
     syncing = true;
     try {
       applyLandedCostLineDefaults(currentRecord.get(), context.sublistId);
+      syncLandedCostBillRouting(currentRecord.get(), context.sublistId);
     } catch (error) {
       log.audit({
         title: 'LCM landed cost line defaults were not applied',
@@ -135,6 +137,18 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
 
     if (isLandedCostField(context, FIELDS.lcmLandedCosts.currency)) {
       syncLandedCostCurrencyExchangeRate(currentRecord.get(), context.sublistId);
+      return;
+    }
+
+    if (
+      isLandedCostField(context, [
+        FIELDS.lcmLandedCosts.targetType,
+        FIELDS.lcmLandedCosts.appendExistingBill,
+        FIELDS.lcmLandedCosts.targetVendorBill,
+        FIELDS.lcmLandedCosts.billGroup,
+      ])
+    ) {
+      syncLandedCostBillRouting(currentRecord.get(), context.sublistId);
       return;
     }
 
@@ -359,6 +373,61 @@ ${defaults.reason || ''}`
     const sublistId = getLandedCostSublistId(contextSublistId);
     setDefaultTextIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.targetType, config.DEFAULTS.targetTypeText);
     setDefaultValueIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.effectiveDate, new Date());
+    setDefaultValueIfBlank(rec, sublistId, FIELDS.lcmLandedCosts.appendExistingBill, false);
+  }
+
+  // The routing fields describe mutually exclusive destinations. This is browser-side
+  // ergonomics only; lcm_accounting_lib.js validates the same rule before any Bill is built.
+  function syncLandedCostBillRouting(rec, contextSublistId) {
+    const sublistId = getLandedCostSublistId(contextSublistId);
+    const f = FIELDS.lcmLandedCosts;
+    const documentType = getLandedCostText(rec, sublistId, f.targetType) || getLandedCostValue(rec, sublistId, f.targetType);
+
+    if (!isBillDocumentType(documentType)) {
+      setLandedCostValue(rec, sublistId, f.appendExistingBill, false);
+      setLandedCostValue(rec, sublistId, f.targetVendorBill, '');
+      setLandedCostValue(rec, sublistId, f.billGroup, '');
+      return;
+    }
+
+    if (isChecked(getLandedCostValue(rec, sublistId, f.appendExistingBill))) {
+      setLandedCostValue(rec, sublistId, f.billGroup, '');
+      return;
+    }
+
+    setLandedCostValue(rec, sublistId, f.targetVendorBill, '');
+  }
+
+  function isBillDocumentType(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z]/g, '')
+      .indexOf('bill') >= 0;
+  }
+
+  function isChecked(value) {
+    return value === true || value === 'T' || value === 'true';
+  }
+
+  function setLandedCostValue(rec, sublistId, fieldId, value) {
+    try {
+      if (sublistId) {
+        rec.setCurrentSublistValue({
+          sublistId,
+          fieldId,
+          value,
+          ignoreFieldChange: true,
+          forceSyncSourcing: false,
+        });
+      } else {
+        rec.setValue({ fieldId, value, ignoreFieldChange: true });
+      }
+    } catch (error) {
+      log.audit({
+        title: 'LCM Bill routing field was not synchronized',
+        details: `${fieldId}: ${error.message || error}`,
+      });
+    }
   }
 
   function isItemRecalculationField(fieldId) {

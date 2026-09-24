@@ -259,6 +259,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
           <td>${escapeHtml(group.subsidiaryText || group.subsidiary || '')}</td>
           <td>${escapeHtml(group.billTypeText || group.billType || '')}</td>
           <td>${escapeHtml(group.currencyText || group.currency || '')}</td>
+          <td>${escapeHtml(group.routeText || '')}</td>
           <td>${escapeHtml(group.actionText || '')}</td>
           <td>${group.rows.length}</td>
           <td>${group.billLineCount || group.rows.length}</td>
@@ -266,7 +267,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
         </tr>`
       )
       .join('');
-    return `<table class="lcm-table"><thead><tr><th>Vendor</th><th>Subsidiary</th><th>Bill Type</th><th>Currency</th><th>Action</th><th>LCM Rows</th><th>Transaction Lines</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
+    return `<table class="lcm-table"><thead><tr><th>Vendor</th><th>Subsidiary</th><th>Bill Type</th><th>Currency</th><th>Routing</th><th>Action</th><th>LCM Rows</th><th>Transaction Lines</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   function renderInventoryDetailRequirements(requirements) {
@@ -298,6 +299,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
           <td>${escapeHtml(line.allocationMethodText)}</td>
           <td>1</td>
           <td>${escapeHtml(String(line.amount))}</td>
+          <td>${escapeHtml(line.routeText || '')}</td>
           <td>${escapeHtml(line.action || 'New Vendor Bill')}</td>
         </tr>`
       )
@@ -318,7 +320,7 @@ define(['N/log', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './l
       )
       .join('');
 
-    return `<h4>Vendor Bill lines to be written</h4><table class="lcm-table"><thead><tr><th>From LCM Rows</th><th>LC Cost Category</th><th>LC Cost Item</th><th>Allocation Method</th><th>Qty</th><th>Amount</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
+    return `<h4>Vendor Bill lines to be written</h4><table class="lcm-table"><thead><tr><th>From LCM Rows</th><th>LC Cost Category</th><th>LC Cost Item</th><th>Allocation Method</th><th>Qty</th><th>Amount</th><th>Routing</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>${
       mismatches
         ? `<h4>Why these lines will not merge</h4><p class="lcm-muted">A line merges into an existing one only when that line carries the same LCM Source Key and still holds the same item. This is what the matcher saw on the Bill, line by line.</p><ul>${mismatches}</ul>`
         : ''

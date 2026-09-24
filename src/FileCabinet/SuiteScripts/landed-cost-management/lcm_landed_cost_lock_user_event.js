@@ -194,6 +194,7 @@ define(
 
     if (context.type === context.UserEventType.CREATE) {
       sourceVendorDefaults(context.newRecord);
+      validateBillRoutingInputs(context.newRecord);
       return;
     }
     if (!context.oldRecord) return;
@@ -209,6 +210,10 @@ define(
       } else {
         sourceVendorDefaults(context.newRecord);
       }
+      // XEDIT only contains the submitted column, so it cannot prove a checkbox and its
+      // companion target together. The Create Bill preview re-reads full rows and enforces
+      // routing server-side; normal create/edit saves receive immediate form validation here.
+      if (context.type !== context.UserEventType.XEDIT) validateBillRoutingInputs(context.newRecord);
       return;
     }
 
@@ -373,11 +378,50 @@ define(
       f.allocationMethod,
       f.billItem,
       f.memo,
+      f.appendExistingBill,
+      f.targetVendorBill,
+      f.billGroup,
     ];
+  }
+
+  function validateBillRoutingInputs(rec) {
+    const f = FIELDS.lcmLandedCosts;
+    const documentType = getTextIfPresent(rec, f.targetType) || getValueIfPresent(rec, f.targetType);
+    if (normalize(documentType).indexOf('bill') < 0) return;
+
+    const appendExisting = isChecked(getValueIfPresent(rec, f.appendExistingBill));
+    const targetVendorBill = getValueIfPresent(rec, f.targetVendorBill);
+    const billGroup = normalizeValue(getValueIfPresent(rec, f.billGroup)).trim();
+
+    if (appendExisting && !targetVendorBill) {
+      throw error.create({
+        name: 'LCM_APPEND_TARGET_REQUIRED',
+        message: 'Target Vendor Bill is required when Append to Existing Bill is checked.',
+        notifyOff: false,
+      });
+    }
+    if (appendExisting && billGroup) {
+      throw error.create({
+        name: 'LCM_APPEND_GROUP_CONFLICT',
+        message: 'Bill Group must be blank when Append to Existing Bill is checked.',
+        notifyOff: false,
+      });
+    }
+    if (!appendExisting && targetVendorBill) {
+      throw error.create({
+        name: 'LCM_APPEND_TARGET_UNEXPECTED',
+        message: 'Clear Target Vendor Bill or check Append to Existing Bill.',
+        notifyOff: false,
+      });
+    }
   }
 
   function normalize(value) {
     return String(value || '').toLowerCase();
+  }
+
+  function isChecked(value) {
+    return value === true || value === 'T' || value === 'true';
   }
 
   function setDefaultIfBlank(rec, fieldId, value, text) {
