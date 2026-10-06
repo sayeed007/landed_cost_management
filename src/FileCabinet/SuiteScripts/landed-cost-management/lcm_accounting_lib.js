@@ -207,7 +207,7 @@ define(
       `${preamble}\n\nThe ${alreadySaved.length} transaction(s) saved before it were kept: ` +
         `${alreadySaved.map((transaction) => `${transaction.label} ${transaction.tranid || transaction.id}`).join(', ')}. ` +
         'Their Landed Cost rows are marked Created. Correct the remaining Landed Cost routing, then re-run this action; ' +
-        `remaining rows will follow their explicit Bill target or Bill Group without duplicating the saved rows.\n${detail}`
+        `remaining rows will follow their explicit Bill target or new-Vendor-Bill route without duplicating the saved rows.\n${detail}`
     );
   }
 
@@ -519,7 +519,6 @@ define(
       f.memo,
       f.appendExistingBill,
       f.targetVendorBill,
-      f.billGroup,
       f.processingStatus,
       f.createdTransactionId,
       f.createdTransactionRef,
@@ -579,7 +578,6 @@ define(
           appendExistingBill: isChecked(getValue(result, f.appendExistingBill)),
           targetVendorBillId: getValue(result, f.targetVendorBill),
           targetVendorBillText: getText(result, f.targetVendorBill),
-          billGroup: normalizeValue(getValue(result, f.billGroup)).trim(),
           processingStatus: status,
           createdTransactionId,
           createdTransactionRefText: getText(result, f.createdTransactionRef),
@@ -1083,9 +1081,6 @@ define(
       if (row.appendExistingBill && !row.targetVendorBillId) {
         errors.push('Target Vendor Bill is required when Append to Existing Bill is checked');
       }
-      if (row.appendExistingBill && row.billGroup) {
-        errors.push('Bill Group must be blank when Append to Existing Bill is checked');
-      }
       if (!row.appendExistingBill && row.targetVendorBillId) {
         errors.push('Target Vendor Bill requires Append to Existing Bill to be checked');
       }
@@ -1120,7 +1115,7 @@ define(
   }
 
   // An append is never inferred from the first compatible Bill. A source row either names the
-  // Bill it is allowed to update, names a pending Bill Group, or remains a standalone new Bill.
+  // Bill it is allowed to update, or joins its vendor's new Bill for this creation run.
   // The target check deliberately does not compare LC Cost Category or LC Cost Item: one Bill
   // can hold different charge categories, and line-level merging handles compatible rows later.
   function validateVendorBillRouting(rows, createdRows) {
@@ -1303,7 +1298,6 @@ define(
           transactionNumber: routing.transactionNumber || '',
           actionText: routing.actionText,
           routeText: routing.routeText,
-          billGroup: routing.billGroup || '',
           rows: [],
           existingRows: (createdRows || []).filter((createdRow) => routing.matchesCreatedRow(createdRow)),
           amount: 0,
@@ -1338,7 +1332,12 @@ define(
   }
 
   function resolveVendorBillRouting(row) {
-    const header = [row.vendor, row.subsidiary, row.currency];
+    const header = [
+      row.vendor,
+      row.subsidiary,
+      row.currency,
+      getVendorBillLandedCostMethodText(row.allocationMethodText),
+    ];
     if (row.appendExistingBill) {
       const targetId = normalizeValue(row.targetVendorBillId).trim();
       const targetNumber = row.targetVendorBillText || targetId;
@@ -1353,21 +1352,10 @@ define(
       };
     }
 
-    const billGroup = normalizeBillGroup(row.billGroup);
-    if (billGroup.key) {
-      return {
-        key: JSON.stringify(['bill', 'new-group'].concat(header, [billGroup.key])),
-        actionText: `Create new Vendor Bill for Bill Group "${billGroup.text}"`,
-        routeText: `New Bill Group: ${billGroup.text}`,
-        billGroup: billGroup.text,
-        matchesCreatedRow: () => false,
-      };
-    }
-
     return {
-      key: JSON.stringify(['bill', 'standalone'].concat(header, [String(row.id || '')])),
-      actionText: 'Create separate new Vendor Bill',
-      routeText: 'Standalone new Vendor Bill',
+      key: JSON.stringify(['bill', 'new-vendor'].concat(header)),
+      actionText: 'Create new Vendor Bill',
+      routeText: 'New Bill for matching Vendor, Subsidiary, Currency, and Allocation Method',
       matchesCreatedRow: () => false,
     };
   }
@@ -1388,12 +1376,7 @@ define(
     };
   }
 
-  function normalizeBillGroup(value) {
-    const text = normalizeValue(value).trim().replace(/\s+/g, ' ');
-    return { text, key: text.toLowerCase() };
-  }
-
-  // Cost Allocation Method is a BODY field on a Vendor Bill. A shared Bill Group or explicit
+  // Cost Allocation Method is a BODY field on a Vendor Bill. An explicit
   // target cannot carry conflicting methods, so reject the destination rather than quietly
   // splitting it or writing a header that misdescribes a source row.
   function findAllocationMethodConflicts(groups) {
@@ -1419,7 +1402,7 @@ define(
     return (
       'a Vendor Bill has one Cost Allocation Method, but these Landed Cost rows ask for ' +
       `${methods.map((method) => `${method} (row ${rowIdsByMethod[method].join(', ')})`).join(' and ')}. ` +
-      'Set one Allocation Method for this Bill Group or route the differing rows to separate Vendor Bills.'
+      'Route the differing rows to separate Vendor Bills or use one Allocation Method on the target Bill.'
     );
   }
 

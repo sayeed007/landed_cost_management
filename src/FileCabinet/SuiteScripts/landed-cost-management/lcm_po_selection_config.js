@@ -15,6 +15,7 @@ define([], () => {
       vendor: 'custrecord_lcm_vendor',
       subsidiary: 'custrecord_lcm_subsidiary',
       selectedPurchaseOrders: 'custrecord_lcm_selected_pos',
+      lcType: 'custrecord_lcm_lc_type',
       shipmentStatus: 'custrecord_lcm_shipment_status',
       shipmentNumber: 'custrecord_lcm_shipment_number',
     },
@@ -63,7 +64,7 @@ define([], () => {
       memo: 'custrecord_lcm_lcm_memo',
       appendExistingBill: 'custrecord_lcm_lcm_append_existing_bill',
       targetVendorBill: 'custrecord_lcm_lcm_target_vendor_bill',
-      billGroup: 'custrecord_lcm_lcm_bill_group',
+      legacyBillGroup: 'custrecord_lcm_lcm_bill_group',
       processingStatus: 'custrecord_lcm_lcm_status',
       createdTransactionId: 'custrecord_lcm_lcm_created_tran_id',
       createdTransactionRef: 'custrecord_lcm_lcm_created_tran_ref',
@@ -134,6 +135,7 @@ define([], () => {
     targetTypeText: 'Bill',
     billLineTypeText: 'Item',
     billTypeText: 'LC Bill',
+    importLcTypeText: 'Import',
     shipmentStatusText: 'To Be Shipped',
     itemReceipt: {
       // Configure these once with approved NetSuite internal IDs when the account requires

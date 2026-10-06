@@ -1,8 +1,10 @@
 # Landed Cost Management PO Selection SuiteScript
 
+Last updated: 2026-10-06
+
 ## Requirement Implemented
 
-Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. Users choose POs through the `Select Receivable POs` Suitelet button, which only lists Purchase Orders that match the header Purchase Order Vendor and have at least one receivable open item line. The selected IDs are stored in the header PO multi-select. When that selection changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
+Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. Header LC Type (`custrecord_lcm_lc_type`) is script-fixed to `Import` because this customization processes Import Purchase Orders only. Users choose POs through the `Select Receivable POs` Suitelet button, which only lists Purchase Orders that match the header Purchase Order Vendor and have at least one receivable open item line. The selected IDs are stored in the header PO multi-select. When that selection changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
 
 ## NetSuite Records Found
 
@@ -107,7 +109,7 @@ Create these before deploying the scripts:
 12. Child fields on `Landed Cost`
    - `Append to Existing Bill` (`custrecord_lcm_lcm_append_existing_bill`), Check Box, default clear.
    - `Target Vendor Bill` (`custrecord_lcm_lcm_target_vendor_bill`), List/Record Transaction (`-30`), required only when Append to Existing Bill is checked.
-   - `Bill Group` (`custrecord_lcm_lcm_bill_group`), Free-Form Text, optional. Matching nonblank text routes pending rows to one new Vendor Bill; blank routes each row to its own new Bill.
+   - `Bill Group` (`custrecord_lcm_lcm_bill_group`) is retired and hidden. Existing values are ignored to preserve historical records without affecting current routing.
 
 ## Files
 
@@ -167,6 +169,7 @@ Upload all files into the same File Cabinet folder so the relative module import
 On header Purchase Order Vendor/PO change:
 
 - Source parent Subsidiary from the selected Purchase Order Vendor.
+- Enforce LC Type `Import` on every save and disable it on the form.
 - Open the `Select Receivable POs` picker from the parent form.
 - List only Purchase Orders that have at least one receivable item line with positive open receipt quantity.
 - Apply checked eligible PO IDs into the stored `Selected Purchase Orders` field.
@@ -199,19 +202,19 @@ On Landed Cost row LC Cost Category change:
 
 On Create Bill:
 
-- Route each Vendor Bill row explicitly. Append to Existing Bill defaults clear: a blank Bill Group creates a separate new Bill per Landed Cost row, while equal nonblank Bill Group text creates one new Bill. Append requires Target Vendor Bill, so the script never selects an earlier compatible Bill implicitly.
+- Route Bill rows by destination. Append to Existing Bill requires Target Vendor Bill, so the script never selects an earlier compatible Bill implicitly. All unappended rows sharing Vendor, Subsidiary, Currency, and effective Allocation Method create one new Vendor Bill.
 - Target Vendor Bill must be editable, created by the same LCM record, and match Vendor, Subsidiary, Currency, and effective Allocation Method. LC Cost Category and item may differ so an Amendment Charge can join an Opening Charge Bill. Exchange Rate does not split a deliberately shared same-vendor/same-currency Bill; the first Bill header rate is retained while each source row's rate remains authoritative for base-currency allocation.
 - Within each deliberately routed Vendor Bill, merge rows into one Vendor Bill item line when Vendor, Subsidiary, Currency, LC Cost Category, LC Cost Item, and Allocation Method all match. Effective Date, Department, and Class do not split the merge group; if they differ, the generated Bill line uses the first source row's values.
 - Build the merge identity from internal IDs first, falling back to normalized display text only for a value that has no internal ID. Key the Allocation Method on the effective NetSuite method instead, so a blank or non-NetSuite list value merges with the Value rows it will be allocated alongside. Rehydrate the hidden native Cost Category and LC Cost Item from the selected mapping record before validating the row and before building the key, so stale or blank hidden values cannot split equivalent lines. Never decide a merge on display text alone.
 - When appending to an existing generated Vendor Bill, match existing cost lines by the same ID-first identity - item strictly, then category - consolidate them into one line, and re-stamp the Cost Category after writing rate and amount.
 - Do not merge different LC Cost Categories, different LC Cost Items, or different Allocation Methods.
-- Refuse an explicit Bill target or shared Bill Group whose Landed Cost rows disagree about the Allocation Method. `Cost Allocation Method` is a Vendor Bill body field, so one Bill can only carry one; separate lines would still all be allocated by whichever method reached the header. Report both methods and the rows asking for each.
+- Refuse an explicit Bill target whose Landed Cost rows disagree about the Allocation Method. `Cost Allocation Method` is a Vendor Bill body field, so one Bill can only carry one; default routing already separates different methods. Report both methods and the rows asking for each.
 - Verify the native Vendor Bill Cost Allocation Method immediately after setting it and again as the final in-memory header write before save. Do not save a Bill that retains the transaction-form default instead of the LCM method. An append can correct a stale default only when the existing Bill is entirely composed of this LCM's marked lines and all of those source rows use the same effective method; manual and foreign lines still make the mismatch a blocking error.
 - Refuse a Landed Cost row whose LC Cost Category mapping does not resolve to a Cost Category and an active LC Cost Item. Never fall back to the hidden native values that mapping was supposed to derive.
 - Stamp every generated landed-cost line with the hidden ownership marker `custcol_lcm_source_key` (`LCM<record id>::<merge key>`), and rewrite or remove only lines whose marker matches. Never infer ownership from amounts: a 600 generated line beside a 400 manual line reconciles against a 1,000 total while identifying neither.
 - Apply the Cost Category and then the marker as the last writes on a line, and read both back before committing. Cancel the line if either did not take.
 - Do not merge into a marked line whose item no longer matches the Landed Cost row; report it and leave it alone.
-- Build every transaction in the run before saving any of them, so a line that cannot be tagged or marked aborts with nothing saved. When a save fails after earlier ones succeeded, report exactly which transactions were written and that remaining rows will follow their explicit Bill target or Bill Group on rerun.
+- Build every transaction in the run before saving any of them, so a line that cannot be tagged or marked aborts with nothing saved. When a save fails after earlier ones succeeded, report exactly which transactions were written and that remaining rows will follow their explicit Bill target or matching new-Vendor-Bill route on rerun.
 - Never let an append touch an unmarked line; add a new line instead. There is no adoption path for unmarked lines.
 - Abort the run when a new cost line cannot be tagged with its Cost Category. Do not save a Bill and mark rows `Created` around a line that can never act as a landed cost source.
 - Abandon a consolidation whose surviving line cannot be tagged with its Cost Category, checking before the commit so the Bill is never left inflated or collapsed into an untagged line.

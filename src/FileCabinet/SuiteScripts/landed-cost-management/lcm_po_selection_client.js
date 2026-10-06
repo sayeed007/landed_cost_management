@@ -145,7 +145,6 @@ define(['N/currentRecord', 'N/https', 'N/log', 'N/url', './lcm_po_selection_conf
         FIELDS.lcmLandedCosts.targetType,
         FIELDS.lcmLandedCosts.appendExistingBill,
         FIELDS.lcmLandedCosts.targetVendorBill,
-        FIELDS.lcmLandedCosts.billGroup,
       ])
     ) {
       syncLandedCostBillRouting(currentRecord.get(), context.sublistId);
@@ -386,12 +385,10 @@ ${defaults.reason || ''}`
     if (!isBillDocumentType(documentType)) {
       setLandedCostValue(rec, sublistId, f.appendExistingBill, false);
       setLandedCostValue(rec, sublistId, f.targetVendorBill, '');
-      setLandedCostValue(rec, sublistId, f.billGroup, '');
       return;
     }
 
     if (isChecked(getLandedCostValue(rec, sublistId, f.appendExistingBill))) {
-      setLandedCostValue(rec, sublistId, f.billGroup, '');
       return;
     }
 

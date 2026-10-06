@@ -26,6 +26,7 @@ define(
     orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.selectedPurchaseOrders);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
+    disableBodyField(context.form, FIELDS.landedCostManagement.lcType);
     renameSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
       { fieldId: FIELDS.lcmLandedCosts.targetType, label: 'Document Type' },
@@ -43,6 +44,7 @@ define(
       FIELDS.lcmLandedCosts.billItem,
       FIELDS.lcmLandedCosts.department,
       FIELDS.lcmLandedCosts.class,
+      FIELDS.lcmLandedCosts.legacyBillGroup,
     ]);
     disableSublistFields(context.form, SUBLISTS.lcmItems, [
       FIELDS.lcmItems.purchaseOrder,
@@ -117,6 +119,7 @@ define(
 
   function beforeSubmit(context) {
     if (context.type === context.UserEventType.DELETE) return;
+    setImportLcType(context.newRecord);
     setInitialShipmentStatus(context.newRecord);
     sourceHeaderVendorDefaults(context.newRecord);
     validateSelectedPurchaseOrders(context.newRecord);
@@ -145,7 +148,6 @@ define(
       const vendorId = context.newRecord.getValue({
         fieldId: FIELDS.landedCostManagement.vendor,
       });
-
       try {
         const summary = lib.syncPersistedItems(parentId, selectedPoIds, vendorId);
         log.audit({ title: 'LCM PO item sync complete', details: summary });
@@ -292,6 +294,23 @@ define(
   function normalizeValue(value) {
     if (Array.isArray(value)) return value.map(String).sort().join(',');
     return String(value === null || value === undefined ? '' : value);
+  }
+
+  function setImportLcType(rec) {
+    try {
+      rec.setText({
+        fieldId: FIELDS.landedCostManagement.lcType,
+        text: config.DEFAULTS.importLcTypeText,
+      });
+    } catch (setError) {
+      throw error.create({
+        name: 'LCM_IMPORT_LC_TYPE_REQUIRED',
+        message: `LC Type must be configured with an active "${config.DEFAULTS.importLcTypeText}" option. ${
+          setError.message || setError
+        }`,
+        notifyOff: false,
+      });
+    }
   }
 
   function isPoSelectionLocked(context) {

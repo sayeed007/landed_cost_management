@@ -48,9 +48,9 @@ define(['N/log', 'N/ui/serverWidget', './lcm_po_selection_lib'], (log, serverWid
       `;
     });
 
-    const body = context.vendorId
-      ? buildOptionsBody(rows)
-      : '<div class="empty">Select Purchase Order Vendor on the Landed Cost Management record first.</div>';
+    const body = !context.vendorId
+      ? '<div class="empty">Select Purchase Order Vendor on the Landed Cost Management record first.</div>'
+      : buildOptionsBody(rows);
 
     return `
       <style>

@@ -1,6 +1,6 @@
 # Landed Cost Management - Record Reference
 
-Last updated: 2026-09-22
+Last updated: 2026-10-06
 
 This document is the working record and field reference for the Landed Cost Management customization. It captures the current NetSuite custom records, field usage, and parent-child relationships. For implemented behavior and requirement chunks, see [lcm_implemented_requirements.md](./lcm_implemented_requirements.md).
 
@@ -22,7 +22,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | --- | --- | --- | --- |
 | Purchase Order Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor used only for selected PO filtering and validation. Landed Cost row `Vendor Name` drives generated Vendor Bills. |
 | Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
-| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which only lists POs that have at least one receivable open item line for the selected Purchase Order Vendor. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
+| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which lists only POs for the selected Purchase Order Vendor that have at least one receivable open item line. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
 | Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Dynamic shipment state: `To Be Shipped` before any Landed Cost row exists; `In Transit` until every Bill row is allocated and every positive-quantity LCM Item is linked to a generated Item Receipt; then `Partially Received` or `Received` from the Items tab Receive Status values. |
 | Shipment Number | `custrecord_lcm_shipment_number` | Text | Legacy hidden shipment number text field. Shipment numbering now uses the custom record auto-number/name with `SHIP-` prefix and 5 minimum digits. |
 | Shipment Date | `custrecord_lcm_shipment_date` | Date | Shipment date for the landed cost record. |
@@ -31,7 +31,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | LC Number | `custrecord_lcm_lc_number` | Text | Letter of Credit number. |
 | LC Value | `custrecord_lcm_lc_value` | Currency | LC value amount. |
 | LC Margin Amount | `custrecord_lcm_lc_margin_amount` | Currency | LC margin amount. |
-| LC Type | `custrecord_lcm_lc_type` | Select, `customlist_lc_type` | LC type classification. |
+| LC Type | `custrecord_lcm_lc_type` | Select, `customlist_lc_type` | Script-fixed to `Import` and disabled on the form. This LCM customization processes Import Purchase Orders only. |
 | LC Status | `custrecord_lcm_lc_status` | Select, `customlist_lc_status` | LC status classification. |
 | Loading Port | `custrecord_lcm_loading_port` | Select, `customlist_wmsse_ports` | Loading port. |
 | Shipment Mode | `custrecord_lcm_shipment_mode` | Select, `-192` | Shipment mode. |
@@ -101,7 +101,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | Name | Field ID | Type | What this is for |
 | --- | --- | --- | --- |
 | Document Type | `custrecord_lcm_lcm_target_type` | Select, `customlist_lcm_acct_target_type` | Chooses whether this cost row is processed by `Create Bill` or `Create Journal`. Mandatory; defaults to `Bill`. Existing field ID is retained for compatibility. |
-| Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. Default Bill routing creates one new Vendor Bill per Landed Cost row; rows share a Bill only through the same Bill Group or an explicit append target. Compatible rows inside that chosen Bill merge into one item line when category, cost item, and allocation method also match. |
+| Vendor Name | `custrecord_lcm_lcm_vendor` | Select, Vendor (`-3`) | Required line-level landed-cost vendor. With no append target, all uncreated Bill rows that share Vendor, Subsidiary, Currency, and effective Allocation Method create one new Vendor Bill. Compatible rows inside that chosen Bill merge into one item line when category, cost item, and allocation method also match. |
 | LC Cost Category | `custrecord_lcm_lcm_cost_item_map` | Select, `customrecord_lcm_cost_item_map` | User-facing selector. Only active mapping records appear as options, so users can pick only configured LC Cost Category and LC Cost Item combinations. |
 | Bill Line Type | `custrecord_lcm_lcm_bill_line_type` | Hidden select, `customlist_lcm_bill_line_type` | Fixed hidden value. Landed-cost bills always create Vendor Bill item lines. |
 | Bill Type | `custrecord_lcm_lcm_cost_bill_type` | Hidden select, `customlist_bill_type` | Fixed hidden Vendor Bill body Bill Type source. Generated Vendor Bills use `LC Bill` through `custbody12`. |
@@ -116,9 +116,9 @@ This document is the working record and field reference for the Landed Cost Mana
 | Department | `custrecord_lcm_lcm_department` | Hidden select, Department (`-102`) | Deprecated hidden classification. Removed from the user-facing Landed Cost sublist. |
 | Class | `custrecord_lcm_lcm_class` | Hidden select, Class (`-101`) | Deprecated hidden classification. Removed from the user-facing Landed Cost sublist. |
 | Memo | `custrecord_lcm_lcm_memo` | Text Area | Memo copied to generated transaction lines. |
-| Append to Existing Bill | `custrecord_lcm_lcm_append_existing_bill` | Checkbox | Defaults to clear. When checked, Target Vendor Bill is mandatory and Bill Group must be blank. |
+| Append to Existing Bill | `custrecord_lcm_lcm_append_existing_bill` | Checkbox | Defaults to clear. When checked, Target Vendor Bill is mandatory. When clear, the row follows automatic new-Vendor-Bill routing. |
 | Target Vendor Bill | `custrecord_lcm_lcm_target_vendor_bill` | Select, Transaction (`-30`) | Explicit append destination. It must be an editable Vendor Bill already created by this LCM with matching Vendor, Subsidiary, Currency, and effective Allocation Method. Category and item need not match. |
-| Bill Group | `custrecord_lcm_lcm_bill_group` | Text | Optional pending-bill label. Equal nonblank labels create one new Bill; blank creates a separate new Bill for the row. Ignored for Journal rows and cleared when Append to Existing Bill is checked. |
+| Bill Group | `custrecord_lcm_lcm_bill_group` | Text | Retired hidden legacy field. Its value is ignored; it is retained only to preserve historical records. |
 | Processing Status | `custrecord_lcm_lcm_status` | Text | Script-managed status. `Created` blocks duplicate accounting creation. |
 | Created Transaction ID | `custrecord_lcm_lcm_created_tran_id` | Hidden text | Internal ID of the generated Vendor Bill or Journal Entry. |
 | Created Transaction | `custrecord_lcm_lcm_created_tran_ref` | Select, Transaction (`-30`) | Visible transaction reference to the generated Vendor Bill or Journal Entry. |

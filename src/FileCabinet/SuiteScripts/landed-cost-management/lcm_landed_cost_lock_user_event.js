@@ -380,7 +380,6 @@ define(
       f.memo,
       f.appendExistingBill,
       f.targetVendorBill,
-      f.billGroup,
     ];
   }
 
@@ -391,19 +390,10 @@ define(
 
     const appendExisting = isChecked(getValueIfPresent(rec, f.appendExistingBill));
     const targetVendorBill = getValueIfPresent(rec, f.targetVendorBill);
-    const billGroup = normalizeValue(getValueIfPresent(rec, f.billGroup)).trim();
-
     if (appendExisting && !targetVendorBill) {
       throw error.create({
         name: 'LCM_APPEND_TARGET_REQUIRED',
         message: 'Target Vendor Bill is required when Append to Existing Bill is checked.',
-        notifyOff: false,
-      });
-    }
-    if (appendExisting && billGroup) {
-      throw error.create({
-        name: 'LCM_APPEND_GROUP_CONFLICT',
-        message: 'Bill Group must be blank when Append to Existing Bill is checked.',
         notifyOff: false,
       });
     }
