@@ -5,7 +5,7 @@
 define(
   ['N/format', 'N/log', 'N/record', 'N/search', './lcm_po_selection_config', './lcm_shipment_status_lib'],
   (format, log, record, search, config, shipmentStatus) => {
-  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEFAULTS } = config;
+  const { RECORDS, FIELDS, TRANSACTION_FIELDS, ACCOUNT_CONSTANTS, DEFAULTS, SHIPMENT_STATUS } = config;
   const STATUS = {
     pending: 'Pending',
     created: 'Created',
@@ -497,6 +497,119 @@ define(
       rows,
       errors,
     };
+  }
+
+  function loadPurchaseOrderReceiptContext(purchaseOrderId) {
+    const id = normalizeValue(purchaseOrderId).trim();
+    if (!id) throw new Error('Purchase Order is required.');
+
+    const purchaseOrder = record.load({ type: record.Type.PURCHASE_ORDER, id, isDynamic: false });
+    const poType = getRecordText(purchaseOrder, TRANSACTION_FIELDS.purchaseOrder.type) ||
+      getRecordValue(purchaseOrder, TRANSACTION_FIELDS.purchaseOrder.type);
+    if (normalizeChoice(poType) !== normalizeChoice(DEFAULTS.importPurchaseOrderTypeText)) {
+      throw new Error(`Purchase Order ${id} is not an Import Purchase Order.`);
+    }
+
+    return {
+      itemReceiptId: '',
+      purchaseOrderId: id,
+      purchaseOrderText: getRecordValue(purchaseOrder, 'tranid') || `Purchase Order ${id}`,
+      vendorId: normalizeValue(getRecordValue(purchaseOrder, 'entity')).trim(),
+      vendorText: getRecordText(purchaseOrder, 'entity'),
+      subsidiaryId: normalizeValue(getRecordValue(purchaseOrder, 'subsidiary')).trim(),
+      subsidiaryText: getRecordText(purchaseOrder, 'subsidiary'),
+    };
+  }
+
+  function listEligibleLcmsForPurchaseOrder(purchaseOrderId) {
+    const context = loadPurchaseOrderReceiptContext(purchaseOrderId);
+    const f = FIELDS.landedCostManagement;
+    const rows = [];
+
+    search
+      .create({
+        type: RECORDS.landedCostManagement,
+        filters: [[f.selectedPurchaseOrders, 'anyof', context.purchaseOrderId]],
+        columns: ['internalid', 'name', f.lcType, f.shipmentStatus, f.vendor, f.subsidiary],
+      })
+      .run()
+      .each((result) => {
+        const parentId = normalizeValue(result.getValue({ name: 'internalid' })).trim();
+        if (!parentId) return true;
+        try {
+          const source = loadLcmReceiptSource(parentId, context, {
+            requireReadyStatus: true,
+            requireUnassigned: true,
+          });
+          rows.push({
+            id: parentId,
+            name: source.name || `LCM-${parentId}`,
+            vendorText: source.vendorText,
+            subsidiaryText: source.subsidiaryText,
+            shipmentStatusText: source.shipmentStatusText,
+            itemCount: source.items.length,
+          });
+        } catch (error) {
+          // Invalid, incomplete, or already-consumed LCMs stay out of the create-time picker.
+        }
+        return true;
+      });
+
+    return {
+      ok: true,
+      purchaseOrderId: context.purchaseOrderId,
+      purchaseOrderText: context.purchaseOrderText,
+      rows,
+    };
+  }
+
+  function createItemReceiptFromLcm(parentId, purchaseOrderId) {
+    const context = loadPurchaseOrderReceiptContext(purchaseOrderId);
+    loadLcmReceiptSource(parentId, context, {
+      requireReadyStatus: true,
+      requireUnassigned: true,
+    });
+
+    const preview = buildItemReceiptPreview(parentId);
+    if (!preview.ok) throw new Error(preview.errors.join('\n') || 'Item Receipt is not ready to create.');
+
+    const group = preview.groups.find((entry) => String(entry.purchaseOrderId) === String(context.purchaseOrderId));
+    if (!group) throw new Error(`LCM ${parentId} has no positive receipt rows for ${context.purchaseOrderText}.`);
+    if (group.action !== 'Create') {
+      throw new Error(
+        `LCM ${parentId} already has Item Receipt ${group.existingReceiptNumber || group.existingReceiptId} for ${context.purchaseOrderText}.`
+      );
+    }
+
+    const prepared = prepareItemReceipt(group, preview.parentId, preview.shipmentNumber);
+    let transaction;
+    try {
+      transaction = prepared.save();
+    } catch (error) {
+      throw new Error(`Item Receipt for ${context.purchaseOrderText} could not be created: ${error.message || error}`);
+    }
+
+    try {
+      linkLcmItemsToItemReceipt(group.rows, transaction.id);
+      const createdBillRows = getCreatedBillRows(parentId);
+      allocateCreatedCosts(parentId, createdBillRows, { reset: true });
+      const finalized = finalizeCostAllocationAfterReceipts(parentId, createdBillRows);
+      shipmentStatus.recalculate(parentId);
+      return {
+        itemReceiptId: String(transaction.id),
+        itemReceiptNumber: transaction.tranid || transaction.id,
+        lcmId: String(parentId),
+        purchaseOrderText: context.purchaseOrderText,
+        action: 'Created',
+        costAllocated: finalized.complete,
+      };
+    } catch (error) {
+      throw new Error(
+        `Item Receipt ${transaction.tranid || transaction.id} was created, but LCM ${parentId} could not be finalized: ${
+          error.message || error
+        }`
+      );
+    }
   }
 
   function attachLcmToItemReceipt(itemReceiptId, parentId) {
@@ -3158,7 +3271,8 @@ define(
     };
     const errors = [];
 
-    if (normalizeChoice(source.lcTypeText) !== normalizeChoice(DEFAULTS.importLcTypeText)) {
+    const allowedLcTypeTexts = DEFAULTS.importLcTypeAliases || [DEFAULTS.importLcTypeText];
+    if (!allowedLcTypeTexts.some((text) => normalizeChoice(source.lcTypeText) === normalizeChoice(text))) {
       errors.push(`LCM ${parentId} is not an Import Landed Cost Management record.`);
     }
     if (source.selectedPurchaseOrders.indexOf(String(context.purchaseOrderId)) < 0) {
@@ -3771,8 +3885,10 @@ define(
     getVendorDefaults,
     listCostCategoryItemMatches,
     listEligibleLcmsForItemReceipt,
+    listEligibleLcmsForPurchaseOrder,
     normalizeMode,
     recalculateAllocatedCosts,
+    createItemReceiptFromLcm,
     validateManagedItemReceipt,
   };
 });

@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/error', 'N/serverWidget', 'N/url', './lcm_po_selection_config', './lcm_accounting_lib'], (
+define(['N/error', 'N/ui/serverWidget', 'N/url', './lcm_po_selection_config', './lcm_accounting_lib'], (
   error,
   serverWidget,
   url,
@@ -24,19 +24,20 @@ define(['N/error', 'N/serverWidget', 'N/url', './lcm_po_selection_config', './lc
 
     const receiptId = String(context.newRecord.id || '').trim();
     const purchaseOrderId = String(context.newRecord.getValue({ fieldId: 'createdfrom' }) || '').trim();
-    if (!receiptId || !purchaseOrderId) return;
+    if (!purchaseOrderId) return;
 
-    const link = url.resolveScript({
-      scriptId: config.SCRIPTS.itemReceiptLcmSuitelet.scriptId,
-      deploymentId: config.SCRIPTS.itemReceiptLcmSuitelet.deploymentId,
-      params: { itemReceiptId: receiptId },
-    });
-    const field = context.form.addField({
-      id: 'custpage_lcm_ir_action',
-      label: 'Landed Cost Management',
-      type: serverWidget.FieldType.INLINEHTML,
-    });
-    field.defaultValue = `<a href="${escapeHtml(link)}">Select Landed Cost Management</a>`;
+    if (!receiptId && context.type === context.UserEventType.CREATE) {
+      const link = url.resolveScript({
+        scriptId: config.SCRIPTS.itemReceiptLcmSuitelet.scriptId,
+        deploymentId: config.SCRIPTS.itemReceiptLcmSuitelet.deploymentId,
+        params: { purchaseOrderId },
+      });
+      context.form.addButton({
+        id: 'custpage_lcm_ir_create_receipt',
+        label: 'Create Item Receipt from LCM',
+        functionName: `window.location.assign.bind(window.location, '${escapeJavaScript(link)}')`,
+      });
+    }
   }
 
   function beforeSubmit(context) {
@@ -108,13 +109,12 @@ define(['N/error', 'N/serverWidget', 'N/url', './lcm_po_selection_config', './lc
     }
   }
 
-  function escapeHtml(value) {
+  function escapeJavaScript(value) {
     return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n');
   }
 
   return { beforeLoad, beforeSubmit };

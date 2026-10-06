@@ -79,6 +79,15 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     return filters.concat(['AND', ['entity', 'anyof', normalizedVendorId]]);
   }
 
+  function getPurchaseOrderTypeText(result) {
+    const fieldId = config.TRANSACTION_FIELDS.purchaseOrder.type;
+    return String(result.getText({ name: fieldId }) || result.getValue({ name: fieldId }) || '').trim();
+  }
+
+  function isImportPurchaseOrder(result) {
+    return getPurchaseOrderTypeText(result).toLowerCase() === config.DEFAULTS.importPurchaseOrderTypeText.toLowerCase();
+  }
+
   function fetchPurchaseOrderHeaders(poIds, vendorIdInput) {
     const headersById = {};
     const filters = appendVendorFilter(
@@ -94,7 +103,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       .create({
         type: search.Type.PURCHASE_ORDER,
         filters,
-        columns: ['internalid', 'tranid', 'entity', 'location'],
+        columns: ['internalid', 'tranid', 'entity', 'location', config.TRANSACTION_FIELDS.purchaseOrder.type],
       })
       .run()
       .each((result) => {
@@ -106,6 +115,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
           vendorText: String(result.getText({ name: 'entity' }) || ''),
           location: String(result.getValue({ name: 'location' }) || ''),
           locationText: String(result.getText({ name: 'location' }) || ''),
+          poTypeText: getPurchaseOrderTypeText(result),
         };
         return true;
       });
@@ -146,6 +156,43 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     }
   }
 
+  function validateImportPurchaseOrders(poIdsInput) {
+    const poIds = normalizeIds(poIdsInput);
+    if (!poIds.length) return;
+
+    const invalid = [];
+    const found = {};
+    search
+      .create({
+        type: search.Type.PURCHASE_ORDER,
+        filters: [
+          ['internalid', 'anyof', poIds],
+          'AND',
+          ['mainline', 'is', 'T'],
+        ],
+        columns: ['internalid', 'tranid', config.TRANSACTION_FIELDS.purchaseOrder.type],
+      })
+      .run()
+      .each((result) => {
+        const poId = String(result.getValue({ name: 'internalid' }) || '');
+        found[poId] = true;
+        if (!isImportPurchaseOrder(result)) {
+          invalid.push(`${result.getValue({ name: 'tranid' }) || poId} (${getPurchaseOrderTypeText(result) || 'blank PO Type'})`);
+        }
+        return true;
+      });
+
+    poIds.forEach((poId) => {
+      if (!found[poId]) invalid.push(`${poId} (not found)`);
+    });
+
+    if (invalid.length) {
+      throw new Error(
+        `Only Import Purchase Orders can be selected for Landed Cost Management. Invalid PO(s): ${invalid.join(', ')}`
+      );
+    }
+  }
+
   function fetchPurchaseOrderItemLines(poIdsInput, vendorIdInput) {
     const poIds = normalizeIds(poIdsInput);
     if (!poIds.length) return [];
@@ -153,6 +200,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     const rows = [];
     const vendorId = normalizeVendorId(vendorIdInput);
     validatePurchaseOrderVendor(poIds, vendorId);
+    validateImportPurchaseOrders(poIds);
     const headersById = fetchPurchaseOrderHeaders(poIds, vendorId);
     const filters = appendVendorFilter(
       [
@@ -280,6 +328,7 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
         'tranid',
         'entity',
         'status',
+        config.TRANSACTION_FIELDS.purchaseOrder.type,
         'quantity',
         'quantityshiprecv',
         itemTypeColumn,
@@ -294,7 +343,11 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
       const itemTypeValue = String(result.getValue(itemTypeColumn) || '');
       const itemTypeText = String(result.getText(itemTypeColumn) || '');
 
-      if ((expectedQuantityReceipt || 0) <= 0 || !isReceivableItemType(itemTypeValue, itemTypeText)) {
+      if (
+        !isImportPurchaseOrder(result) ||
+        (expectedQuantityReceipt || 0) <= 0 ||
+        !isReceivableItemType(itemTypeValue, itemTypeText)
+      ) {
         return true;
       }
 
@@ -757,5 +810,6 @@ define(['N/record', 'N/search', './lcm_po_selection_config'], (record, search, c
     recalculatePersistedItemValues,
     syncPersistedItems,
     validatePurchaseOrderVendor,
+    validateImportPurchaseOrders,
   };
 });

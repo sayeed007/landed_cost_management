@@ -22,7 +22,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | --- | --- | --- | --- |
 | Purchase Order Vendor | `custrecord_lcm_vendor` | Select, Vendor (`-3`) | Header vendor used only for selected PO filtering and validation. Landed Cost row `Vendor Name` drives generated Vendor Bills. |
 | Subsidiary | `custrecord_lcm_subsidiary` | Select, `-117` | Subsidiary context sourced from Vendor and disabled on the form. |
-| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which lists only POs for the selected Purchase Order Vendor that have at least one receivable open item line. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
+| Selected Purchase Orders | `custrecord_lcm_selected_pos` | Multi-select, Purchase Order (`-30`) | Stored PO selection field. The form makes it read-only and users populate it through the `Select Receivable POs` Suitelet, which lists only POs for the selected Purchase Order Vendor with `custbody_po_type = Import` and at least one receivable open item line. Changing this field regenerates the `LCM Items` child sublist from selected PO item lines. |
 | Shipment Status | `custrecord_lcm_shipment_status` | Select, `customlist2527` | Dynamic shipment state: `To Be Shipped` before any Landed Cost row exists; `In Transit` until every Bill row is allocated and every positive-quantity LCM Item is linked to a generated Item Receipt; then `Partially Received` or `Received` from the Items tab Receive Status values. |
 | Shipment Number | `custrecord_lcm_shipment_number` | Text | Legacy hidden shipment number text field. Shipment numbering now uses the custom record auto-number/name with `SHIP-` prefix and 5 minimum digits. |
 | Shipment Date | `custrecord_lcm_shipment_date` | Date | Shipment date for the landed cost record. |
@@ -31,7 +31,7 @@ This document is the working record and field reference for the Landed Cost Mana
 | LC Number | `custrecord_lcm_lc_number` | Text | Letter of Credit number. |
 | LC Value | `custrecord_lcm_lc_value` | Currency | LC value amount. |
 | LC Margin Amount | `custrecord_lcm_lc_margin_amount` | Currency | LC margin amount. |
-| LC Type | `custrecord_lcm_lc_type` | Select, `customlist_lc_type` | Script-fixed to `Import` and disabled on the form. This LCM customization processes Import Purchase Orders only. |
+| LC Type | `custrecord_lcm_lc_type` | Select, `customlist_lc_type` | Defaults to `Import`, is enforced on save, and is disabled on the form. Legacy `LC Bill (Import)` is accepted for compatibility. This LCM customization processes Import Purchase Orders only. |
 | LC Status | `custrecord_lcm_lc_status` | Select, `customlist_lc_status` | LC status classification. |
 | Loading Port | `custrecord_lcm_loading_port` | Select, `customlist_wmsse_ports` | Loading port. |
 | Shipment Mode | `custrecord_lcm_shipment_mode` | Select, `-192` | Shipment mode. |
@@ -143,15 +143,14 @@ Field lifecycle: `Vendor Name` (`custrecord_lcm_lcm_vendor`), `Bill Type` (`cust
 
 The Item Receipt marker is a hidden transaction body field deployed by `src/Objects/custbody_lcm_ir_source_key.xml`; it applies to Item Receipts only and must remain deployed for rerun safety.
 
-## 5. Standalone Item Receipt to LCM Linking
+## 5. Item Receipt Creation from LCM
 
-Saved Item Receipts created from a Purchase Order expose a separate `Select Landed Cost Management` action. It is implemented by `customscript_lcm_item_receipt_ue` and `customscript_lcm_ir_lcm_sl`; the User Event is deployed to Item Receipt from the template in `docs/sdf/customscript_lcm_item_receipt_ue.xml` because this account does not expose native `itemreceipt` as an SDF dependency. It does not replace or attach the existing Item Receipt Bulk Receive client script.
+An Item Receipt create form opened from a Purchase Order exposes `Create Item Receipt from LCM`. It is implemented by `customscript_lcm_item_receipt_ue` and `customscript_lcm_ir_lcm_sl`; the User Event is deployed to Item Receipt from the template in `docs/sdf/customscript_lcm_item_receipt_ue.xml` because this account does not expose native `itemreceipt` as an SDF dependency. It does not replace or attach the existing Item Receipt Bulk Receive client script.
 
-- The visible Item Receipt relationship is `custbody_lcm_ir_management` (`Landed Cost Management`, select to `customrecord_landed_cost_management`). The existing hidden idempotency field remains `custbody_lcm_ir_source_key` with format `LCM<lcm id>::PO<po id>`.
-- The picker lists only Import LCM records whose selected PO contains the current Item Receipt PO, Shipment Status is `In Transit` or `Partially Received`, every Bill-type Landed Cost row is `Created`, and at least one positive LCM Item belongs to the PO.
-- An LCM/PO pair can be linked only once. A multi-PO LCM may link one Item Receipt for each selected PO.
-- Attach validates PO line key, item, receive flag, quantity, and Receiving Location against the existing receipt and does not overwrite receipt quantities or physical inventory detail. It applies the existing per-PO landed-cost allocation as native Manual category amounts, then saves the visible link and source marker, links LCM Items, and refreshes allocation and Shipment Status.
-- Linked receipts are locked for LCM-controlled item and landed-cost fields. Physical lot, serial, bin, status, and expiration fields remain editable for warehouse correction. Server-side validation rejects a changed or cleared relationship even if a form-level field cannot be disabled.
+- The create-time picker lists only Import LCM records whose selected PO is the current PO, Shipment Status is `In Transit` or `Partially Received`, every Bill-type Landed Cost row is `Created`, positive LCM Items exist for the PO, and the LCM/PO pair has no existing receipt link or source marker.
+- POST revalidates the PO, vendor, subsidiary, LCM status, bill rows, existing receipt markers, PO line keys, item, receive flag, quantity, and Receiving Location. It does not use a manually saved receipt as the source of the plan.
+- The selected LCM is the authoritative source for the new receipt. The system transforms the PO, clears non-LCM receive lines, receives only the LCM Items, applies each LCM Item Quantity Receipt and PO-sourced Receiving Location, and applies the per-PO native Manual landed-cost allocation before saving.
+- After save, the visible relationship `custbody_lcm_ir_management` and hidden idempotency marker `custbody_lcm_ir_source_key` (`LCM<lcm id>::PO<po id>`) are written, LCM Items are linked, allocation and Shipment Status are refreshed, and the receipt is locked against LCM-controlled changes. Physical lot, serial, bin, status, and expiration fields remain NetSuite-owned.
 
 The visible relationship field is deployed by `src/Objects/custbody_lcm_ir_management.xml`; the hidden marker remains deployed by `src/Objects/custbody_lcm_ir_source_key.xml`.
 

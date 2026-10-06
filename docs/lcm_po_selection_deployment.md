@@ -4,7 +4,7 @@ Last updated: 2026-10-06
 
 ## Requirement Implemented
 
-Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. Header LC Type (`custrecord_lcm_lc_type`) is script-fixed to `Import` because this customization processes Import Purchase Orders only. Users choose POs through the `Select Receivable POs` Suitelet button, which only lists Purchase Orders that match the header Purchase Order Vendor and have at least one receivable open item line. The selected IDs are stored in the header PO multi-select. When that selection changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
+Move Purchase Order Vendor and PO selection to the `Landed Cost Management` header. Header LC Type (`custrecord_lcm_lc_type`) defaults to `Import`, is enforced on save, and is disabled on the form because this customization processes Import Purchase Orders only. Users choose POs through the `Select Receivable POs` Suitelet button, which only lists Purchase Orders that match the header Purchase Order Vendor, have `custbody_po_type` equal to `Import`, and have at least one receivable open item line. The selected IDs are stored in the header PO multi-select. When that selection changes, the `LCM Items` subtab is refreshed from selected receivable PO item lines. Removing a PO from the header selection removes/deletes the generated item rows tied to that PO.
 
 ## NetSuite Records Found
 
@@ -292,6 +292,6 @@ Files:
 
 The account's SDF metadata does not expose the native `itemreceipt` dependency, so the Item Receipt User Event XML template is kept at `docs/sdf/customscript_lcm_item_receipt_ue.xml` and must be created/deployed from NetSuite UI with record type `Item Receipt` after the File Cabinet upload. This is an account deployment limitation, not a runtime dependency; the script itself is `lcm_item_receipt_user_event.js` and the separate picker Suitelet is deployed by SDF.
 
-The Item Receipt User Event intentionally does not set `form.clientScriptModulePath`; the existing Item Receipt Bulk Receive scripts remain separate and unchanged. On saved PO Item Receipts it renders the standalone picker link. The picker accepts only an Import LCM with status `In Transit` or `Partially Received`, created Bill rows, positive item rows for the current PO, and no existing LCM/PO receipt link. POST repeats those checks before applying native Manual landed costs and saving the relationship.
+The Item Receipt User Event intentionally does not set `form.clientScriptModulePath`; the existing Item Receipt Bulk Receive scripts remain separate and unchanged. On PO Item Receipt create forms it renders `Create Item Receipt from LCM`. The picker accepts only an Import LCM with status `In Transit` or `Partially Received`, created Bill rows, positive item rows for the current PO, and no existing LCM/PO receipt link. POST repeats those checks before transforming the PO with LCM-controlled item quantities, locations, and landed costs.
 
 After linking, server validation locks the LCM-controlled Item Receipt plan and landed-cost fields while leaving physical inventory detail available for warehouse correction. Run `node --check` on both new scripts, then `npm run validate` and `npm run deploy`.

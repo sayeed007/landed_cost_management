@@ -128,6 +128,9 @@ define([], () => {
       sourceKey: 'custbody_lcm_ir_source_key',
       landedCostMethod: 'landedcostmethod',
     },
+    purchaseOrder: {
+      type: 'custbody_po_type',
+    },
   };
 
   const ACCOUNT_CONSTANTS = {
@@ -141,6 +144,9 @@ define([], () => {
     billLineTypeText: 'Item',
     billTypeText: 'LC Bill',
     importLcTypeText: 'Import',
+    importLcTypeId: '4',
+    importLcTypeAliases: ['Import', 'LC Bill (Import)'],
+    importPurchaseOrderTypeText: 'Import',
     shipmentStatusText: 'To Be Shipped',
     itemReceipt: {
       // Configure these once with approved NetSuite internal IDs when the account requires

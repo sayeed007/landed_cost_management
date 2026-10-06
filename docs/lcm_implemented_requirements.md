@@ -17,8 +17,8 @@ Implemented behavior:
 - The root `Subsidiary` field (`custrecord_lcm_subsidiary`) is sourced from the selected Purchase Order Vendor and disabled on the form by User Event `beforeLoad`.
 - The root `Selected Purchase Orders` field is disabled on the form and populated through the `Select Receivable POs` Suitelet button.
 - The existing child line `PO` field remains as a reference field on `LCM Items`.
-- PO selection is filtered and validated by the root Purchase Order Vendor to prevent mixed-vendor PO selection.
-- The header `LC Type` (`custrecord_lcm_lc_type`) is fixed to `Import`: it is enforced on every save and disabled on the form. This LCM customization processes Import Purchase Orders only.
+- PO selection is filtered and validated by the root Purchase Order Vendor and PO body field `custbody_po_type = Import` to prevent mixed-vendor or non-import PO selection.
+- The header `LC Type` (`custrecord_lcm_lc_type`) defaults to `Import`, is enforced on every save, and is disabled on the form. The legacy account label `LC Bill (Import)` is also accepted for compatibility. This LCM customization processes Import Purchase Orders only.
 - The selector Suitelet only lists purchase orders with at least one eligible receivable item line, so fully received or otherwise non-receivable POs are excluded before the user can choose them.
 - PO-sourced child fields are made read-only/disabled by User Event `beforeLoad`.
 - Line-level PO changes are not used to trigger item population.
@@ -272,12 +272,12 @@ Accounting rehydrates those derived values from the selected mapping before vali
 
 Every failure path now reports the selected mapping/category internal ID, selected text, mapping source, mapping record ID, and reason. Failures log at `error` level, successes at `audit`.
 
-## 12. Standalone Item Receipt to LCM Linking
+## 12. Item Receipt Creation from LCM
 
 - New transaction body field `custbody_lcm_ir_management` exposes the linked `customrecord_landed_cost_management` record on Item Receipts. The existing hidden `custbody_lcm_ir_source_key` remains the idempotency marker.
-- `customscript_lcm_item_receipt_ue` adds a standalone `Select Landed Cost Management` action to saved PO Item Receipts and enforces the relationship on save. In account `9385847`, deploy it to Item Receipt from `docs/sdf/customscript_lcm_item_receipt_ue.xml` because native `itemreceipt` is not available as an SDF dependency. `customscript_lcm_ir_lcm_sl` lists only eligible Import LCM records and revalidates the selection during POST.
+- `customscript_lcm_item_receipt_ue` adds a create-time `Create Item Receipt from LCM` action to PO Item Receipt forms and enforces the relationship on save. In account `9385847`, deploy it to Item Receipt from `docs/sdf/customscript_lcm_item_receipt_ue.xml` because native `itemreceipt` is not available as an SDF dependency. `customscript_lcm_ir_lcm_sl` lists eligible Import LCM records for the current PO and revalidates the selection during POST.
 - Eligibility requires the Item Receipt PO to be selected on the LCM, Shipment Status `In Transit` or `Partially Received`, all Bill rows `Created`, positive LCM Items for that PO, and no existing LCM/PO receipt link.
-- Attach validates PO line key, item, receive flag, quantity, and Receiving Location, then applies the existing per-PO native Manual landed-cost allocation. It does not overwrite physical inventory detail or receipt quantities.
+- The selected LCM is authoritative at creation time: the system transforms the current PO, receives only LCM Item rows using their PO line keys, item, receive flag, Quantity Receipt, and Receiving Location, then applies the existing per-PO native Manual landed-cost allocation. It does not depend on a manually created or edited receipt.
 - After linking, the visible reference, source marker, LCM Item links, cost allocation flags, GRN number, and Shipment Status are updated. A multi-PO LCM can link one receipt per PO, but the same LCM/PO pair cannot be linked twice.
 - The new User Event does not set `form.clientScriptModulePath` and does not modify the independent Item Receipt Bulk Receive scripts. Server validation rejects clearing or changing LCM-controlled receipt and landed-cost fields; physical lot/serial/bin/status/expiration fields remain NetSuite-owned.
 

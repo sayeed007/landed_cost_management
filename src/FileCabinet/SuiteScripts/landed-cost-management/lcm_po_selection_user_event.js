@@ -26,6 +26,7 @@ define(
     orderHeaderFields(context.form);
     disableBodyField(context.form, FIELDS.landedCostManagement.selectedPurchaseOrders);
     disableBodyField(context.form, FIELDS.landedCostManagement.subsidiary);
+    applyInitialLcType(context);
     disableBodyField(context.form, FIELDS.landedCostManagement.lcType);
     renameSublistFields(context.form, SUBLISTS.lcmLandedCosts, [
       { fieldId: FIELDS.lcmLandedCosts.vendor, label: 'Vendor Name' },
@@ -285,6 +286,7 @@ define(
       });
     }
     lib.validatePurchaseOrderVendor(selectedPoIds, vendorId);
+    lib.validateImportPurchaseOrders(selectedPoIds);
   }
 
   function normalizeSelection(value) {
@@ -297,18 +299,80 @@ define(
   }
 
   function setImportLcType(rec) {
+    const fieldId = FIELDS.landedCostManagement.lcType;
+    const candidates = config.DEFAULTS.importLcTypeAliases || [config.DEFAULTS.importLcTypeText];
+    let lastError;
+
     try {
-      rec.setText({
-        fieldId: FIELDS.landedCostManagement.lcType,
-        text: config.DEFAULTS.importLcTypeText,
+      rec.setValue({ fieldId, value: config.DEFAULTS.importLcTypeId });
+      const appliedValue = String(rec.getValue({ fieldId }) || '').trim();
+      if (appliedValue === String(config.DEFAULTS.importLcTypeId)) {
+        return {
+          value: appliedValue,
+          text: config.DEFAULTS.importLcTypeText,
+        };
+      }
+      lastError = new Error(`LC Type resolved to "${appliedValue || 'blank'}".`);
+    } catch (setValueError) {
+      lastError = setValueError;
+    }
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      try {
+        rec.setText({
+          fieldId,
+          text: candidates[index],
+        });
+        const appliedText = String(rec.getText({ fieldId }) || '').trim();
+        if (isAllowedLcTypeText(appliedText)) {
+          return {
+            value: String(rec.getValue({ fieldId }) || ''),
+            text: appliedText,
+          };
+        }
+        lastError = new Error(`LC Type resolved to "${appliedText || 'blank'}".`);
+      } catch (setError) {
+        lastError = setError;
+      }
+    }
+
+    throw error.create({
+      name: 'LCM_IMPORT_LC_TYPE_REQUIRED',
+      message: `LC Type must be configured with an active "${config.DEFAULTS.importLcTypeText}" option. ${
+        lastError && (lastError.message || lastError)
+      }`,
+      notifyOff: false,
+    });
+  }
+
+  function isAllowedLcTypeText(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return (config.DEFAULTS.importLcTypeAliases || [config.DEFAULTS.importLcTypeText]).some(
+      (text) => normalized === String(text).trim().toLowerCase()
+    );
+  }
+
+  function applyInitialLcType(context) {
+    const fieldId = FIELDS.landedCostManagement.lcType;
+    let selectedValue = config.DEFAULTS.importLcTypeId;
+    try {
+      if (!context.newRecord.getValue({ fieldId })) {
+        selectedValue = setImportLcType(context.newRecord).value || selectedValue;
+      }
+    } catch (recordError) {
+      log.audit({
+        title: 'LCM initial LC Type record default skipped',
+        details: recordError.message || recordError,
       });
-    } catch (setError) {
-      throw error.create({
-        name: 'LCM_IMPORT_LC_TYPE_REQUIRED',
-        message: `LC Type must be configured with an active "${config.DEFAULTS.importLcTypeText}" option. ${
-          setError.message || setError
-        }`,
-        notifyOff: false,
+    }
+
+    try {
+      const field = context.form.getField({ id: fieldId });
+      field.defaultValue = selectedValue;
+    } catch (formError) {
+      log.audit({
+        title: 'LCM initial LC Type form default skipped',
+        details: formError.message || formError,
       });
     }
   }
