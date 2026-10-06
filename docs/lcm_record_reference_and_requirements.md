@@ -143,7 +143,19 @@ Field lifecycle: `Vendor Name` (`custrecord_lcm_lcm_vendor`), `Bill Type` (`cust
 
 The Item Receipt marker is a hidden transaction body field deployed by `src/Objects/custbody_lcm_ir_source_key.xml`; it applies to Item Receipts only and must remain deployed for rerun safety.
 
-## 5. Mapping Custom Record: LCM Cost Category Item Map
+## 5. Standalone Item Receipt to LCM Linking
+
+Saved Item Receipts created from a Purchase Order expose a separate `Select Landed Cost Management` action. It is implemented by `customscript_lcm_item_receipt_ue` and `customscript_lcm_ir_lcm_sl`; the User Event is deployed to Item Receipt from the template in `docs/sdf/customscript_lcm_item_receipt_ue.xml` because this account does not expose native `itemreceipt` as an SDF dependency. It does not replace or attach the existing Item Receipt Bulk Receive client script.
+
+- The visible Item Receipt relationship is `custbody_lcm_ir_management` (`Landed Cost Management`, select to `customrecord_landed_cost_management`). The existing hidden idempotency field remains `custbody_lcm_ir_source_key` with format `LCM<lcm id>::PO<po id>`.
+- The picker lists only Import LCM records whose selected PO contains the current Item Receipt PO, Shipment Status is `In Transit` or `Partially Received`, every Bill-type Landed Cost row is `Created`, and at least one positive LCM Item belongs to the PO.
+- An LCM/PO pair can be linked only once. A multi-PO LCM may link one Item Receipt for each selected PO.
+- Attach validates PO line key, item, receive flag, quantity, and Receiving Location against the existing receipt and does not overwrite receipt quantities or physical inventory detail. It applies the existing per-PO landed-cost allocation as native Manual category amounts, then saves the visible link and source marker, links LCM Items, and refreshes allocation and Shipment Status.
+- Linked receipts are locked for LCM-controlled item and landed-cost fields. Physical lot, serial, bin, status, and expiration fields remain editable for warehouse correction. Server-side validation rejects a changed or cleared relationship even if a form-level field cannot be disabled.
+
+The visible relationship field is deployed by `src/Objects/custbody_lcm_ir_management.xml`; the hidden marker remains deployed by `src/Objects/custbody_lcm_ir_source_key.xml`.
+
+## 6. Mapping Custom Record: LCM Cost Category Item Map
 
 | Property | Value |
 | --- | --- |
@@ -167,7 +179,7 @@ Mapping behavior:
 - The mapping User Event also names each mapping record from the selected LC Cost Category so the Landed Cost dropdown displays the category text.
 - Inactivating a mapping row removes it from the user-facing Landed Cost options.
 
-## 6. Related Documents
+## 7. Related Documents
 
 - [Implemented requirements](./lcm_implemented_requirements.md)
 - [PO selection deployment notes](./lcm_po_selection_deployment.md)

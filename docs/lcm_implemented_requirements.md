@@ -272,4 +272,13 @@ Accounting rehydrates those derived values from the selected mapping before vali
 
 Every failure path now reports the selected mapping/category internal ID, selected text, mapping source, mapping record ID, and reason. Failures log at `error` level, successes at `audit`.
 
+## 12. Standalone Item Receipt to LCM Linking
+
+- New transaction body field `custbody_lcm_ir_management` exposes the linked `customrecord_landed_cost_management` record on Item Receipts. The existing hidden `custbody_lcm_ir_source_key` remains the idempotency marker.
+- `customscript_lcm_item_receipt_ue` adds a standalone `Select Landed Cost Management` action to saved PO Item Receipts and enforces the relationship on save. In account `9385847`, deploy it to Item Receipt from `docs/sdf/customscript_lcm_item_receipt_ue.xml` because native `itemreceipt` is not available as an SDF dependency. `customscript_lcm_ir_lcm_sl` lists only eligible Import LCM records and revalidates the selection during POST.
+- Eligibility requires the Item Receipt PO to be selected on the LCM, Shipment Status `In Transit` or `Partially Received`, all Bill rows `Created`, positive LCM Items for that PO, and no existing LCM/PO receipt link.
+- Attach validates PO line key, item, receive flag, quantity, and Receiving Location, then applies the existing per-PO native Manual landed-cost allocation. It does not overwrite physical inventory detail or receipt quantities.
+- After linking, the visible reference, source marker, LCM Item links, cost allocation flags, GRN number, and Shipment Status are updated. A multi-PO LCM can link one receipt per PO, but the same LCM/PO pair cannot be linked twice.
+- The new User Event does not set `form.clientScriptModulePath` and does not modify the independent Item Receipt Bulk Receive scripts. Server validation rejects clearing or changing LCM-controlled receipt and landed-cost fields; physical lot/serial/bin/status/expiration fields remain NetSuite-owned.
+
 `N/log` in a **client** script writes to the browser console, not the NetSuite execution log. Client-side entries will never appear under the script deployment; open browser devtools for those.

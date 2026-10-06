@@ -277,3 +277,21 @@ On save:
 The legacy amount-type PO Currency field was removed. Visible PO currency text is stored in `custrecord_lcmitems_po_currency_text`.
 
 If the child sublist is not editable through `currentRecord`, keep the User Event deployed; the item lines will still be corrected after save, but the immediate on-change UX will need a custom Suitelet form or an editable child-record sublist configuration.
+
+## Standalone Item Receipt to LCM Linking
+
+Deploy these SDF objects with the LCM project:
+
+- `custbody_lcm_ir_management.xml`: visible Item Receipt body select to `customrecord_landed_cost_management`.
+- `customscript_lcm_item_receipt_sl.xml`: `customscript_lcm_ir_lcm_sl` / `customdeploy_lcm_ir_lcm_sl`, the filtered picker Suitelet.
+
+Files:
+
+- `lcm_item_receipt_user_event.js`
+- `lcm_item_receipt_lcm_suitelet.js`
+
+The account's SDF metadata does not expose the native `itemreceipt` dependency, so the Item Receipt User Event XML template is kept at `docs/sdf/customscript_lcm_item_receipt_ue.xml` and must be created/deployed from NetSuite UI with record type `Item Receipt` after the File Cabinet upload. This is an account deployment limitation, not a runtime dependency; the script itself is `lcm_item_receipt_user_event.js` and the separate picker Suitelet is deployed by SDF.
+
+The Item Receipt User Event intentionally does not set `form.clientScriptModulePath`; the existing Item Receipt Bulk Receive scripts remain separate and unchanged. On saved PO Item Receipts it renders the standalone picker link. The picker accepts only an Import LCM with status `In Transit` or `Partially Received`, created Bill rows, positive item rows for the current PO, and no existing LCM/PO receipt link. POST repeats those checks before applying native Manual landed costs and saving the relationship.
+
+After linking, server validation locks the LCM-controlled Item Receipt plan and landed-cost fields while leaving physical inventory detail available for warehouse correction. Run `node --check` on both new scripts, then `npm run validate` and `npm run deploy`.

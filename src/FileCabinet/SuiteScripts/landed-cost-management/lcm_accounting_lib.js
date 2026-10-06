@@ -34,15 +34,6 @@ define(
     return value === null || value === undefined ? '' : String(value);
   }
 
-  function normalizeIds(value) {
-    if (!value) return [];
-    if (Array.isArray(value)) return value.map(String).filter(Boolean);
-    return String(value)
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
-
   function normalizeChoice(value) {
     return String(value || '')
       .toLowerCase()
@@ -463,6 +454,147 @@ define(
     };
   }
 
+  function listEligibleLcmsForItemReceipt(itemReceiptId) {
+    const context = loadItemReceiptLinkContext(itemReceiptId);
+    const f = FIELDS.landedCostManagement;
+    const rows = [];
+    const errors = [];
+
+    search
+      .create({
+        type: RECORDS.landedCostManagement,
+        filters: [[f.selectedPurchaseOrders, 'anyof', context.purchaseOrderId]],
+        columns: ['internalid', 'name', f.lcType, f.shipmentStatus, f.vendor, f.subsidiary],
+      })
+      .run()
+      .each((result) => {
+        const parentId = normalizeValue(result.getValue({ name: 'internalid' })).trim();
+        if (!parentId) return true;
+        try {
+          const source = loadLcmReceiptSource(parentId, context, {
+            requireReadyStatus: true,
+            requireUnassigned: true,
+          });
+          rows.push({
+            id: parentId,
+            name: source.name || `LCM-${parentId}`,
+            vendorText: source.vendorText,
+            subsidiaryText: source.subsidiaryText,
+            shipmentStatusText: source.shipmentStatusText,
+            itemCount: source.items.length,
+          });
+        } catch (error) {
+          // Invalid or already-consumed LCMs are intentionally omitted from the picker.
+        }
+        return true;
+      });
+
+    return {
+      ok: true,
+      itemReceiptId: String(itemReceiptId),
+      purchaseOrderId: context.purchaseOrderId,
+      purchaseOrderText: context.purchaseOrderText,
+      rows,
+      errors,
+    };
+  }
+
+  function attachLcmToItemReceipt(itemReceiptId, parentId) {
+    const data = buildItemReceiptLinkData(itemReceiptId, parentId, { requireUnassigned: true });
+    if (data.errors.length) {
+      throw new Error(data.errors.join('\n'));
+    }
+
+    const receipt = data.receipt;
+    applyItemReceiptLandedCosts(receipt, data.group);
+    setRequiredItemReceiptLcmManagement(receipt, parentId, data.purchaseOrderText);
+    setRequiredItemReceiptSourceKey(receipt, data.sourceKey, data.purchaseOrderText);
+    appendItemReceiptMemo(receipt, parentId, data.purchaseOrderText);
+
+    let savedId;
+    try {
+      savedId = receipt.save({ enableSourcing: true, ignoreMandatoryFields: false });
+    } catch (error) {
+      throw new Error(`Item Receipt ${itemReceiptId} could not be linked to LCM ${parentId}: ${error.message || error}`);
+    }
+
+    try {
+      linkLcmItemsToItemReceipt(data.lcmItems, savedId);
+      allocateCreatedCosts(parentId, data.createdBillRows, { reset: true });
+      const finalized = finalizeCostAllocationAfterReceipts(parentId, data.createdBillRows);
+      shipmentStatus.recalculate(parentId);
+      return {
+        itemReceiptId: String(savedId),
+        lcmId: String(parentId),
+        purchaseOrderText: data.purchaseOrderText,
+        action: 'Linked',
+        costAllocated: finalized.complete,
+      };
+    } catch (error) {
+      throw new Error(
+        `Item Receipt ${itemReceiptId} was saved and linked to LCM ${parentId}, but final LCM allocation could not complete: ${
+          error.message || error
+        }`
+      );
+    }
+  }
+
+  function validateManagedItemReceipt(receipt, oldRecord, eventType) {
+    const current = getItemReceiptLinkState(receipt);
+    const previous = oldRecord ? getItemReceiptLinkState(oldRecord) : { parentId: '', sourceKey: '', poId: '' };
+
+    if (eventType === 'delete' && (previous.parentId || previous.sourceKey)) {
+      throw new Error('An Item Receipt linked to Landed Cost Management cannot be deleted. Resolve the LCM relationship first.');
+    }
+    if (!current.parentId && !current.sourceKey) {
+      if (previous.parentId || previous.sourceKey) {
+        throw new Error('The Landed Cost Management link and source marker cannot be cleared from a managed Item Receipt.');
+      }
+      return { managed: false };
+    }
+    if (eventType === 'xedit') {
+      throw new Error('Inline edits are not allowed on an Item Receipt linked to Landed Cost Management.');
+    }
+
+    const parentId = current.parentId || current.sourceParentId;
+    const purchaseOrderId = normalizeValue(getRecordValue(receipt, 'createdfrom')).trim();
+    if (!parentId || !purchaseOrderId) {
+      throw new Error('A managed Item Receipt must have both a Landed Cost Management record and a source Purchase Order.');
+    }
+    if (current.sourcePoId && current.sourcePoId !== purchaseOrderId) {
+      throw new Error('The Item Receipt source marker does not match its source Purchase Order.');
+    }
+    if (current.parentId && current.sourceParentId && current.parentId !== current.sourceParentId) {
+      throw new Error('The Landed Cost Management link does not match the Item Receipt source marker.');
+    }
+    if (previous.parentId && previous.parentId !== parentId) {
+      throw new Error('The Landed Cost Management link cannot be changed after it is assigned.');
+    }
+    if (previous.parentId && !current.parentId) {
+      throw new Error('The Landed Cost Management link cannot be cleared after it is assigned.');
+    }
+    if (previous.sourceKey && !current.sourceKey) {
+      throw new Error('The Item Receipt source marker cannot be cleared after it is assigned.');
+    }
+
+    if (!current.parentId) {
+      setRequiredItemReceiptLcmManagement(receipt, parentId, getRecordText(receipt, 'createdfrom') || purchaseOrderId);
+    }
+    const sourceKey = buildItemReceiptSourceKey(parentId, purchaseOrderId);
+    if (!current.sourceKey) {
+      setRequiredItemReceiptSourceKey(receipt, sourceKey, getRecordText(receipt, 'createdfrom') || purchaseOrderId);
+    } else if (current.sourceKey !== sourceKey) {
+      throw new Error('The Item Receipt source marker does not match the selected Landed Cost Management record.');
+    }
+
+    const data = buildItemReceiptLinkData(receipt.id || '', parentId, {
+      receipt,
+      requireUnassigned: false,
+    });
+    if (data.errors.length) throw new Error(data.errors.join('\n'));
+    return { managed: true, parentId, purchaseOrderId };
+  }
+
   function assertParentAccessible(parentId) {
     if (!parentId) throw new Error('Missing Landed Cost Management record ID.');
     record.load({
@@ -833,43 +965,6 @@ define(
     return rows;
   }
 
-  function listCostCategories() {
-    const attempts = [
-      { type: 'costcategory', columns: ['internalid', 'name'] },
-      { type: 'landedcostcategory', columns: ['internalid', 'name'] },
-    ];
-    const categoriesById = {};
-
-    attempts.forEach((attempt) => {
-      try {
-        search
-          .create({
-            type: attempt.type,
-            filters: [],
-            columns: attempt.columns,
-          })
-          .run()
-          .each((result) => {
-            const id = normalizeValue(result.getValue({ name: 'internalid' }));
-            const text = normalizeValue(result.getValue({ name: 'name' })) || normalizeValue(result.getText({ name: 'name' }));
-            if (id && text && !categoriesById[id]) {
-              categoriesById[id] = { id, text };
-            }
-            return true;
-          });
-      } catch (error) {
-        log.audit({
-          title: 'LCM cost category list attempt failed',
-          details: `${attempt.type}: ${error.message || error}`,
-        });
-      }
-    });
-
-    return Object.keys(categoriesById)
-      .map((id) => categoriesById[id])
-      .sort((a, b) => a.text.localeCompare(b.text));
-  }
-
   function getVendorDefaults(vendorId) {
     if (!vendorId) return {};
     if (vendorDefaultsCache[vendorId]) return vendorDefaultsCache[vendorId];
@@ -1022,6 +1117,7 @@ define(
           f.purchaseOrder,
           f.item,
           f.quantityReceipt,
+          f.receivingLocation,
           f.poRate,
           f.exchangeRate,
           f.poCurrencyText,
@@ -1041,6 +1137,8 @@ define(
           itemId: getValue(result, f.item),
           itemText: getText(result, f.item),
           quantity: toNumber(getValue(result, f.quantityReceipt)),
+          receivingLocation: getValue(result, f.receivingLocation),
+          receivingLocationText: getText(result, f.receivingLocation),
           poRate: toNumber(getValue(result, f.poRate)) || 0,
           exchangeRate: toNumber(getValue(result, f.exchangeRate)) || 1,
           poCurrencyText: getValue(result, f.poCurrencyText) || '',
@@ -2682,6 +2780,7 @@ define(
     applyItemReceiptInventoryDetails(receipt, receivedLines, shipmentNumber, group.purchaseOrderText);
 
     const sourceKey = buildItemReceiptSourceKey(parentId, group.purchaseOrderId);
+    setRequiredItemReceiptLcmManagement(receipt, parentId, group.purchaseOrderText);
     setRequiredItemReceiptSourceKey(receipt, sourceKey, group.purchaseOrderText);
     appendItemReceiptMemo(receipt, parentId, group.purchaseOrderText);
     applyItemReceiptLandedCosts(receipt, group);
@@ -2994,6 +3093,335 @@ define(
         }`
       );
     }
+  }
+
+  function setRequiredItemReceiptLcmManagement(receipt, parentId, purchaseOrderText) {
+    const fieldId = TRANSACTION_FIELDS.itemReceipt.lcmManagement;
+    try {
+      receipt.setValue({ fieldId, value: String(parentId) });
+      if (normalizeValue(getRecordValue(receipt, fieldId)) !== String(parentId)) {
+        throw new Error('the value was not retained by the Item Receipt form');
+      }
+    } catch (error) {
+      throw new Error(
+        `Item Receipt for PO ${purchaseOrderText} could not be linked through ${fieldId}. Deploy the LCM Item Receipt Management field. ${
+          error.message || error
+        }`
+      );
+    }
+  }
+
+  function loadItemReceiptLinkContext(itemReceiptId) {
+    const receipt = record.load({ type: record.Type.ITEM_RECEIPT, id: itemReceiptId, isDynamic: false });
+    const purchaseOrderId = normalizeValue(getRecordValue(receipt, 'createdfrom')).trim();
+    if (!purchaseOrderId) {
+      throw new Error('This Item Receipt was not created from a Purchase Order.');
+    }
+    return {
+      receipt,
+      itemReceiptId: String(itemReceiptId),
+      purchaseOrderId,
+      purchaseOrderText: getRecordText(receipt, 'createdfrom') || purchaseOrderId,
+      vendorId: normalizeValue(getRecordValue(receipt, 'entity')).trim(),
+      subsidiaryId: normalizeValue(getRecordValue(receipt, 'subsidiary')).trim(),
+    };
+  }
+
+  function getItemReceiptLinkState(receipt) {
+    const sourceKey = normalizeValue(getRecordValue(receipt, TRANSACTION_FIELDS.itemReceipt.sourceKey)).trim();
+    const sourceMatch = sourceKey.match(/^LCM([^:]+)::PO(.+)$/);
+    return {
+      parentId: normalizeValue(getRecordValue(receipt, TRANSACTION_FIELDS.itemReceipt.lcmManagement)).trim(),
+      sourceKey,
+      sourceParentId: sourceMatch ? sourceMatch[1] : '',
+      sourcePoId: sourceMatch ? sourceMatch[2] : '',
+      poId: normalizeValue(getRecordValue(receipt, 'createdfrom')).trim(),
+    };
+  }
+
+  function loadLcmReceiptSource(parentId, context, options) {
+    const f = FIELDS.landedCostManagement;
+    const parent = record.load({ type: RECORDS.landedCostManagement, id: parentId, isDynamic: false });
+    const source = {
+      id: String(parentId),
+      name: normalizeValue(getRecordValue(parent, 'name')).trim() || `LCM-${parentId}`,
+      vendorId: normalizeValue(getRecordValue(parent, f.vendor)).trim(),
+      vendorText: getRecordText(parent, f.vendor),
+      subsidiaryId: normalizeValue(getRecordValue(parent, f.subsidiary)).trim(),
+      subsidiaryText: getRecordText(parent, f.subsidiary),
+      lcTypeText: getRecordText(parent, f.lcType) || normalizeValue(getRecordValue(parent, f.lcType)),
+      shipmentStatusText: getRecordText(parent, f.shipmentStatus) || normalizeValue(getRecordValue(parent, f.shipmentStatus)),
+      selectedPurchaseOrders: normalizeIdList(getRecordValue(parent, f.selectedPurchaseOrders)),
+      items: [],
+      costRows: [],
+      createdBillRows: [],
+    };
+    const errors = [];
+
+    if (normalizeChoice(source.lcTypeText) !== normalizeChoice(DEFAULTS.importLcTypeText)) {
+      errors.push(`LCM ${parentId} is not an Import Landed Cost Management record.`);
+    }
+    if (source.selectedPurchaseOrders.indexOf(String(context.purchaseOrderId)) < 0) {
+      errors.push(`LCM ${parentId} does not include Purchase Order ${context.purchaseOrderText}.`);
+    }
+    if (options && options.requireReadyStatus) {
+      const status = normalizeChoice(source.shipmentStatusText);
+      if (status !== normalizeChoice(SHIPMENT_STATUS.inTransit) && status !== normalizeChoice(SHIPMENT_STATUS.partiallyReceived)) {
+        errors.push(`LCM ${parentId} has Shipment Status ${source.shipmentStatusText || '(blank)'}, not In Transit or Partially Received.`);
+      }
+    }
+    if (source.vendorId && context.vendorId && source.vendorId !== context.vendorId) {
+      errors.push(`LCM ${parentId} Vendor does not match the Item Receipt vendor.`);
+    }
+    if (source.subsidiaryId && context.subsidiaryId && source.subsidiaryId !== context.subsidiaryId) {
+      errors.push(`LCM ${parentId} Subsidiary does not match the Item Receipt subsidiary.`);
+    }
+
+    source.items = fetchLcmReceiptItems(parentId).filter(
+      (row) => String(row.purchaseOrderId) === String(context.purchaseOrderId)
+    );
+    if (!source.items.length) {
+      errors.push(`LCM ${parentId} has no positive Quantity Receipt rows for ${context.purchaseOrderText}.`);
+    }
+
+    source.costRows = fetchLandedCostRows(parentId).filter((row) => row.targetMode === MODES.bill);
+    source.createdBillRows = source.costRows.filter((row) => row.isCreated);
+    if (!source.costRows.length) {
+      errors.push(`LCM ${parentId} has no Bill-type Landed Cost rows.`);
+    } else if (source.costRows.some((row) => !row.isCreated)) {
+      errors.push(`All Bill-type Landed Cost rows on LCM ${parentId} must be Created before linking an Item Receipt.`);
+    }
+
+    if (options && options.requireUnassigned) {
+      if (source.items.some((row) => row.itemReceiptId)) {
+        errors.push(`LCM ${parentId} already has an Item Receipt linked for ${context.purchaseOrderText}.`);
+      }
+      const existingReceipt = findGeneratedItemReceipt(parentId, context.purchaseOrderId);
+      if (existingReceipt) {
+        errors.push(`LCM ${parentId} already has generated Item Receipt ${existingReceipt.tranid || existingReceipt.id} for this PO.`);
+      }
+    } else if (context.itemReceiptId) {
+      source.items.forEach((row) => {
+        if (row.itemReceiptId && String(row.itemReceiptId) !== String(context.itemReceiptId)) {
+          errors.push(`LCM Item ${row.id} is linked to another Item Receipt ${row.itemReceiptText || row.itemReceiptId}.`);
+        }
+      });
+      const existingReceipt = findGeneratedItemReceipt(parentId, context.purchaseOrderId);
+      if (existingReceipt && String(existingReceipt.id) !== String(context.itemReceiptId)) {
+        errors.push(`LCM ${parentId} already uses Item Receipt ${existingReceipt.tranid || existingReceipt.id} for this PO.`);
+      }
+    }
+
+    if (errors.length) {
+      const error = new Error(errors.join('\n'));
+      error.validationErrors = errors;
+      throw error;
+    }
+    return source;
+  }
+
+  function buildItemReceiptLinkData(itemReceiptOrId, parentId, options) {
+    const context = options && options.receipt
+      ? {
+          receipt: options.receipt,
+          itemReceiptId: String(options.receipt.id || itemReceiptOrId || ''),
+          purchaseOrderId: normalizeValue(getRecordValue(options.receipt, 'createdfrom')).trim(),
+          purchaseOrderText: getRecordText(options.receipt, 'createdfrom') || '',
+          vendorId: normalizeValue(getRecordValue(options.receipt, 'entity')).trim(),
+          subsidiaryId: normalizeValue(getRecordValue(options.receipt, 'subsidiary')).trim(),
+        }
+      : loadItemReceiptLinkContext(itemReceiptOrId);
+    const errors = [];
+    const receiptLink = getItemReceiptLinkState(context.receipt);
+    const requestedParentId = String(parentId || '').trim();
+    if (!requestedParentId) errors.push('Landed Cost Management record is required.');
+    if (!context.purchaseOrderId) errors.push('The Item Receipt must be created from a Purchase Order.');
+    if (receiptLink.parentId && receiptLink.parentId !== requestedParentId) {
+      errors.push(`This Item Receipt is already linked to LCM ${receiptLink.parentId}.`);
+    }
+    if (receiptLink.sourceParentId && receiptLink.sourceParentId !== requestedParentId) {
+      errors.push(`This Item Receipt source marker belongs to LCM ${receiptLink.sourceParentId}.`);
+    }
+    if (receiptLink.sourcePoId && receiptLink.sourcePoId !== context.purchaseOrderId) {
+      errors.push('This Item Receipt source marker does not match its source Purchase Order.');
+    }
+
+    let source;
+    if (!errors.length) {
+      try {
+        source = loadLcmReceiptSource(requestedParentId, context, {
+          requireReadyStatus: Boolean(options && options.requireUnassigned),
+          requireUnassigned: Boolean(options && options.requireUnassigned),
+        });
+      } catch (error) {
+        errors.push(error.message || String(error));
+      }
+    }
+    if (!source) {
+      return { errors, receipt: context.receipt, purchaseOrderText: context.purchaseOrderText };
+    }
+
+    const allocation = buildReceiptLandedCostAllocations(fetchLcmReceiptItems(requestedParentId), source.createdBillRows);
+    errors.push(...allocation.errors);
+    const poAllocation = allocation.byPurchaseOrder[context.purchaseOrderId];
+    if (!poAllocation) errors.push(`No landed-cost allocation was calculated for ${context.purchaseOrderText}.`);
+
+    const lineErrors = validateItemReceiptLinePlan(context.receipt, context.purchaseOrderId, source.items);
+    errors.push(...lineErrors);
+    if (options && options.requireUnassigned && !receiptLink.parentId && !receiptLink.sourceKey) {
+      const existingAmounts = listNonZeroItemReceiptLandedCostFields(context.receipt);
+      if (existingAmounts.length) {
+        errors.push(`The Item Receipt already contains landed-cost amounts: ${existingAmounts.join(', ')}.`);
+      }
+    }
+
+    const group = {
+      purchaseOrderId: context.purchaseOrderId,
+      purchaseOrderText: context.purchaseOrderText || context.purchaseOrderId,
+      rows: source.items,
+      landedCosts: poAllocation ? poAllocation.landedCosts : [],
+      baseLandedCostAmount: poAllocation ? poAllocation.baseAmount : 0,
+      allocationMethodText: allocation.allocationMethodText,
+    };
+
+    if (!(options && options.requireUnassigned)) {
+      errors.push(...validateItemReceiptLandedCostPlan(context.receipt, group));
+    }
+    return {
+      errors,
+      receipt: context.receipt,
+      lcmItems: source.items,
+      costRows: source.costRows,
+      createdBillRows: source.createdBillRows,
+      group,
+      sourceKey: buildItemReceiptSourceKey(requestedParentId, context.purchaseOrderId),
+      purchaseOrderText: context.purchaseOrderText || context.purchaseOrderId,
+    };
+  }
+
+  function validateItemReceiptLinePlan(receipt, purchaseOrderId, rows) {
+    const errors = [];
+    const poLinesByKey = loadPurchaseOrderLineIndex(purchaseOrderId);
+    const expectedByReceiptLine = {};
+    (rows || []).forEach((row) => {
+      const sourceLineKey = extractPoLineUniqueKey(purchaseOrderId, row.poLineKey);
+      const sourceLine = sourceLineKey ? poLinesByKey[sourceLineKey] : null;
+      if (!sourceLine) {
+        errors.push(`LCM Item ${row.id} cannot be matched to PO line ${row.poLineKey || '(blank)'}.`);
+        return;
+      }
+      const receiptLine = findTransformedItemReceiptLine(receipt, sourceLine);
+      if (receiptLine < 0) {
+        errors.push(`LCM Item ${row.id} cannot be matched to a line on the current Item Receipt.`);
+        return;
+      }
+      if (expectedByReceiptLine[receiptLine]) {
+        errors.push(`More than one LCM Item resolves to Item Receipt line ${receiptLine + 1}.`);
+        return;
+      }
+      expectedByReceiptLine[receiptLine] = row;
+      const currentItem = normalizeValue(getSublistValue(receipt, 'item', 'item', receiptLine)).trim();
+      if (currentItem !== String(row.itemId)) {
+        errors.push(`Item Receipt line ${receiptLine + 1} item does not match LCM Item ${row.id}.`);
+      }
+      if (!isChecked(getSublistValue(receipt, 'item', 'itemreceive', receiptLine))) {
+        errors.push(`Item Receipt line ${receiptLine + 1} must be marked for receipt by LCM Item ${row.id}.`);
+      }
+      const currentQuantity = toNumber(getSublistValue(receipt, 'item', 'quantity', receiptLine));
+      if (currentQuantity === null || Math.abs(currentQuantity - row.quantity) > 0.000001) {
+        errors.push(`Item Receipt line ${receiptLine + 1} quantity must equal LCM Item ${row.quantity}.`);
+      }
+      if (row.receivingLocation) {
+        const currentLocation = normalizeValue(getSublistValue(receipt, 'item', 'location', receiptLine)).trim();
+        if (currentLocation !== String(row.receivingLocation)) {
+          errors.push(`Item Receipt line ${receiptLine + 1} location must match LCM Item ${row.receivingLocationText || row.receivingLocation}.`);
+        }
+      }
+    });
+
+    const lineCount = getLineCount(receipt, 'item');
+    for (let line = 0; line < lineCount; line += 1) {
+      if (isChecked(getSublistValue(receipt, 'item', 'itemreceive', line)) && !expectedByReceiptLine[line]) {
+        errors.push(`Item Receipt line ${line + 1} is marked for receipt but is not present in the LCM Item plan.`);
+      }
+    }
+    return errors;
+  }
+
+  function validateItemReceiptLandedCostPlan(receipt, group) {
+    const errors = [];
+    const expectedAmountFields = {};
+    const method = getVendorBillLandedCostMethodText(group.allocationMethodText);
+    const currentMethod = normalizeChoice(getRecordText(receipt, TRANSACTION_FIELDS.itemReceipt.landedCostMethod) || getRecordValue(receipt, TRANSACTION_FIELDS.itemReceipt.landedCostMethod));
+    if (currentMethod !== normalizeChoice(method)) {
+      errors.push(`Item Receipt Allocation Method must match LCM (${method}).`);
+    }
+
+    (group.landedCosts || [])
+      .filter((entry) => (entry.amount || 0) !== 0)
+      .forEach((entry) => {
+        const sourceFields = getTransactionLandedCostFieldIds(receipt, 'source', {
+          costCategory: entry.costCategory,
+          costCategoryText: entry.costCategoryText,
+        });
+        const amountFields = getTransactionLandedCostFieldIds(receipt, 'amount', {
+          costCategory: entry.costCategory,
+          costCategoryText: entry.costCategoryText,
+        });
+        amountFields.forEach((fieldId) => {
+          expectedAmountFields[fieldId] = true;
+        });
+        if (!sourceFields.length || !amountFields.length) {
+          errors.push(`Item Receipt does not expose landed-cost fields for ${entry.costCategoryText || entry.costCategory}.`);
+          return;
+        }
+        const source = normalizeChoice(getRecordText(receipt, sourceFields[0]) || getRecordValue(receipt, sourceFields[0]));
+        if (source !== 'manual') errors.push(`Landed Cost source for ${entry.costCategoryText || entry.costCategory} must be Manual.`);
+        const amount = toNumber(getRecordValue(receipt, amountFields[0]));
+        if (amount === null || Math.abs(amount - roundCurrency(entry.amount)) > 0.005) {
+          errors.push(`Landed Cost amount for ${entry.costCategoryText || entry.costCategory} must be ${roundCurrency(entry.amount)}.`);
+        }
+      });
+
+    let fields = [];
+    try {
+      fields = receipt.getFields() || [];
+    } catch (error) {
+      fields = [];
+    }
+    fields
+      .filter((fieldId) => String(fieldId).indexOf('landedcostamount') === 0)
+      .forEach((fieldId) => {
+        const amount = toNumber(getRecordValue(receipt, fieldId));
+        if (amount !== null && Math.abs(amount) > 0.005 && !expectedAmountFields[fieldId]) {
+          errors.push(`Unexpected landed-cost amount exists on ${fieldId}.`);
+        }
+      });
+    return errors;
+  }
+
+  function listNonZeroItemReceiptLandedCostFields(receipt) {
+    let fields = [];
+    try {
+      fields = receipt.getFields() || [];
+    } catch (error) {
+      return [];
+    }
+    return fields
+      .filter((fieldId) => String(fieldId).indexOf('landedcostamount') === 0)
+      .filter((fieldId) => {
+        const amount = toNumber(getRecordValue(receipt, fieldId));
+        return amount !== null && Math.abs(amount) > 0.005;
+      });
+  }
+
+  function normalizeIdList(value) {
+    if (Array.isArray(value)) {
+      return uniqueIds(
+        value.map((entry) => (entry && typeof entry === 'object' ? entry.value || entry.id : entry))
+      );
+    }
+    return uniqueIds(String(value || '').split(','));
   }
 
   function appendItemReceiptMemo(receipt, parentId, purchaseOrderText) {
@@ -3333,14 +3761,18 @@ define(
     buildItemReceiptPreview,
     createTransactions,
     createItemReceipts,
+    attachLcmToItemReceipt,
     fetchLandedCostRows,
+    getItemReceiptLinkState,
     getAllocationMethodDefault,
     getCostItemMapDefaults,
     getVendorBillDefaults,
     getVendorCurrencyDefaults,
     getVendorDefaults,
     listCostCategoryItemMatches,
+    listEligibleLcmsForItemReceipt,
     normalizeMode,
     recalculateAllocatedCosts,
+    validateManagedItemReceipt,
   };
 });

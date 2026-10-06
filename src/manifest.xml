@@ -14,6 +14,11 @@
       <feature required="false">EXTREMELIST</feature>
       <feature required="false">MAILMERGE</feature>
       <feature required="true">SUBSIDIARIES</feature>
+      <feature required="true">CLASSES</feature>
+      <feature required="true">LOCATIONS</feature>
+      <feature required="false">MATRIXITEMS</feature>
+      <feature required="true">DEPARTMENTS</feature>
+      <feature required="true">MULTICURRENCY</feature>
     </features>
     <objects>
       <object>customrecord_landed_cost_management</object>
@@ -21,9 +26,9 @@
       <object>customrecord_lcmitems</object>
       <object>customrecord_lcm_landed_cost</object>
       <object>customlist_bill_type</object>
-      <object>custbody12</object>
       <object>customlist_wmsse_ports</object>
       <object>customlist_lc_status</object>
+      <object>custbody12</object>
     </objects>
   </dependencies>
 </manifest>

@@ -97,6 +97,10 @@ define([], () => {
       scriptId: 'customscript_lcm_accounting_sl',
       deploymentId: 'customdeploy_lcm_accounting_sl',
     },
+    itemReceiptLcmSuitelet: {
+      scriptId: 'customscript_lcm_ir_lcm_sl',
+      deploymentId: 'customdeploy_lcm_ir_lcm_sl',
+    },
   };
 
   const DEBUG = {
@@ -118,6 +122,7 @@ define([], () => {
       sourceKey: 'custcol_lcm_source_key',
     },
     itemReceipt: {
+      lcmManagement: 'custbody_lcm_ir_management',
       // One deterministic marker per LCM/PO receipt. It allows a rerun to reconnect LCM
       // items to a receipt saved before the child-row link could be persisted.
       sourceKey: 'custbody_lcm_ir_source_key',
