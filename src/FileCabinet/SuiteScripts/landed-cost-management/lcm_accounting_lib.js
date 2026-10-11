@@ -19,6 +19,9 @@ define(
   const journalAccountCandidatesCache = {};
   const inventoryDetailFlagsCache = {};
   const defaultInventoryStatusCache = {};
+  const receivingBinCache = {};
+  const receivingBinsCache = {};
+  const receivingLocationsCache = {};
 
   function toNumber(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -259,7 +262,7 @@ define(
     };
   }
 
-  function buildItemReceiptPreview(parentId) {
+  function buildItemReceiptPreview(parentId, receiptInputs) {
     const preview = {
       ok: false,
       mode: 'itemReceipt',
@@ -271,6 +274,7 @@ define(
       receiptItems: [],
       groups: [],
       inventoryDetailRequirements: [],
+      receiptInputRows: [],
       shipmentNumber: '',
       skippedRows: [],
       errors: [],
@@ -286,7 +290,10 @@ define(
     const billRows = fetchLandedCostRows(preview.parentId).filter((row) => row.targetMode === MODES.bill);
     preview.createdBillRows = billRows.filter((row) => row.isCreated);
     preview.pendingBillRows = billRows.filter((row) => !row.isCreated);
-    preview.receiptItems = fetchLcmReceiptItems(preview.parentId);
+    const normalizedReceiptInputs = normalizeItemReceiptInputs(receiptInputs);
+    preview.receiptItems = fetchLcmReceiptItems(preview.parentId).map((row) =>
+      applyItemReceiptInput(row, normalizedReceiptInputs[String(row.id)] || {})
+    );
     preview.allocationTargetCount = preview.receiptItems.filter((row) => row.trackItem).length;
 
     if (!billRows.length) {
@@ -365,6 +372,9 @@ define(
     }
 
     preview.groups = Object.keys(groupsByPo).map((poId) => groupsByPo[poId]);
+    preview.receiptInputRows = preview.groups
+      .filter((group) => group.action === 'Create')
+      .reduce((rows, group) => rows.concat(group.rows || []), []);
     if (!preview.errors.length) {
       preview.groups
         .filter((group) => group.action === 'Create')
@@ -374,7 +384,14 @@ define(
             requirement.autoReceiptInventoryNumber = requirement.isSerial
               ? ''
               : buildAutomaticReceiptInventoryNumber(preview.shipmentNumber, requirement);
-            getInventoryDetailAutomationErrors(requirement).forEach((error) => preview.errors.push(error));
+            requirement.defaultBinNumber = getAutomaticInventoryDetailValue(
+              'sourcedBinNumber',
+              'receivingBinByLocation',
+              requirement
+            );
+            getInventoryDetailAutomationErrors(requirement, { allowManualInput: true }).forEach((error) =>
+              preview.errors.push(error)
+            );
           });
           group.inventoryDetailRequirements = requirements;
           preview.inventoryDetailRequirements.push(...requirements);
@@ -388,8 +405,29 @@ define(
     return preview;
   }
 
-  function createItemReceipts(parentId) {
-    const preview = buildItemReceiptPreview(parentId);
+  function normalizeItemReceiptInputs(receiptInputs) {
+    const normalized = {};
+    Object.keys(receiptInputs || {}).forEach((key) => {
+      const input = receiptInputs[key] || {};
+      normalized[String(key)] = {
+        receivingLocation: normalizeValue(input.receivingLocation).trim(),
+        lotSerialNumber: normalizeValue(input.lotSerialNumber).trim(),
+        binNumber: normalizeValue(input.binNumber).trim(),
+      };
+    });
+    return normalized;
+  }
+
+  function applyItemReceiptInput(row, input) {
+    return Object.assign({}, row, {
+      receivingLocation: normalizeValue(input.receivingLocation).trim() || row.receivingLocation,
+      receiptInventoryNumber: normalizeValue(input.lotSerialNumber).trim(),
+      receivingBinNumber: normalizeValue(input.binNumber).trim(),
+    });
+  }
+
+  function createItemReceipts(parentId, receiptInputs) {
+    const preview = buildItemReceiptPreview(parentId, receiptInputs);
     if (!preview.ok) {
       const error = new Error(preview.errors.join('\n') || 'No Item Receipts are ready to create.');
       error.preview = preview;
@@ -563,14 +601,14 @@ define(
     };
   }
 
-  function createItemReceiptFromLcm(parentId, purchaseOrderId) {
+  function createItemReceiptFromLcm(parentId, purchaseOrderId, receiptInputs) {
     const context = loadPurchaseOrderReceiptContext(purchaseOrderId);
     loadLcmReceiptSource(parentId, context, {
       requireReadyStatus: true,
       requireUnassigned: true,
     });
 
-    const preview = buildItemReceiptPreview(parentId);
+    const preview = buildItemReceiptPreview(parentId, receiptInputs);
     if (!preview.ok) throw new Error(preview.errors.join('\n') || 'Item Receipt is not ready to create.');
 
     const group = preview.groups.find((entry) => String(entry.purchaseOrderId) === String(context.purchaseOrderId));
@@ -1230,6 +1268,7 @@ define(
           f.purchaseOrder,
           f.item,
           f.quantityReceipt,
+          f.expectedQuantityReceipt,
           f.receivingLocation,
           f.poRate,
           f.exchangeRate,
@@ -1250,6 +1289,7 @@ define(
           itemId: getValue(result, f.item),
           itemText: getText(result, f.item),
           quantity: toNumber(getValue(result, f.quantityReceipt)),
+          expectedQuantityReceipt: toNumber(getValue(result, f.expectedQuantityReceipt)),
           receivingLocation: getValue(result, f.receivingLocation),
           receivingLocationText: getText(result, f.receivingLocation),
           poRate: toNumber(getValue(result, f.poRate)) || 0,
@@ -2722,7 +2762,7 @@ define(
 
   function inspectItemReceiptInventoryDetails(group) {
     const receipt = transformItemReceipt(group);
-    const receivedLines = configureItemReceiptLines(receipt, group);
+    const receivedLines = configureItemReceiptLines(receipt, group, { allowMissingLocation: true });
     return receivedLines
       .map((entry) => getItemReceiptInventoryDetailRequirement(receipt, entry))
       .filter(Boolean);
@@ -2737,7 +2777,8 @@ define(
     });
   }
 
-  function configureItemReceiptLines(receipt, group) {
+  function configureItemReceiptLines(receipt, group, options) {
+    const allowMissingLocation = Boolean(options && options.allowMissingLocation);
     const poLinesByKey = loadPurchaseOrderLineIndex(group.purchaseOrderId);
     const receiptLineCount = getLineCount(receipt, 'item');
     const usedReceiptLines = {};
@@ -2765,15 +2806,26 @@ define(
       }
       usedReceiptLines[receiptLine] = true;
       receipt.setSublistValue({ sublistId: 'item', fieldId: 'itemreceive', line: receiptLine, value: true });
+      const receivingLocation = normalizeValue(row.receivingLocation).trim();
+      if (!receivingLocation && !allowMissingLocation) {
+        throw new Error(
+          `LCM Item ${row.id} requires a Receiving Location. Fill Receiving Location on the LCM Items sublist before creating the Item Receipt.`
+        );
+      }
+      if (receivingLocation) {
+        receipt.setSublistValue({ sublistId: 'item', fieldId: 'location', line: receiptLine, value: receivingLocation });
+      }
       receipt.setSublistValue({ sublistId: 'item', fieldId: 'quantity', line: receiptLine, value: row.quantity });
 
       const appliedQuantity = toNumber(getSublistValue(receipt, 'item', 'quantity', receiptLine));
+      const appliedLocation = normalizeValue(getSublistValue(receipt, 'item', 'location', receiptLine)).trim();
       if (
         !isChecked(getSublistValue(receipt, 'item', 'itemreceive', receiptLine)) ||
         appliedQuantity === null ||
-        Math.abs(appliedQuantity - row.quantity) > 0.000001
+        Math.abs(appliedQuantity - row.quantity) > 0.000001 ||
+        (!allowMissingLocation && appliedLocation !== receivingLocation)
       ) {
-        throw new Error(`LCM Item ${row.id} could not set its receive quantity on the transformed Item Receipt.`);
+        throw new Error(`LCM Item ${row.id} could not set its receiving location and quantity on the transformed Item Receipt.`);
       }
       return { row, receiptLine };
     });
@@ -2917,7 +2969,10 @@ define(
       const requirement = requirementsByLcmItem[String(entry.row.id)];
       if (!requirement) return;
 
-      const assignment = buildAutomaticInventoryAssignment(requirement, shipmentNumber);
+      const assignment = buildAutomaticInventoryAssignment(requirement, shipmentNumber, {
+        receiptInventoryNumber: entry.row.receiptInventoryNumber,
+        binNumber: entry.row.receivingBinNumber,
+      });
       validateInventoryAssignments(requirement, [assignment], purchaseOrderText);
       const detail = getSublistSubrecord(receipt, 'item', 'inventorydetail', entry.receiptLine);
       if (!detail) {
@@ -2957,14 +3012,20 @@ define(
     });
   }
 
-  function buildAutomaticInventoryAssignment(requirement, shipmentNumber) {
-    const errors = getInventoryDetailAutomationErrors(requirement);
+  function buildAutomaticInventoryAssignment(requirement, shipmentNumber, overrides) {
+    const input = overrides || {};
+    const errors = getInventoryDetailAutomationErrors(requirement, {
+      receiptInventoryNumber: input.receiptInventoryNumber,
+      binNumber: input.binNumber,
+    });
     if (errors.length) throw new Error(errors.join('\n'));
     return {
       receiptInventoryNumber: requirement.requiresReceiptInventoryNumber
-        ? buildAutomaticReceiptInventoryNumber(shipmentNumber, requirement)
+        ? normalizeValue(input.receiptInventoryNumber).trim() || buildAutomaticReceiptInventoryNumber(shipmentNumber, requirement)
         : '',
-      binNumber: getAutomaticInventoryDetailValue('sourcedBinNumber', 'receivingBinByLocation', requirement),
+      binNumber:
+        normalizeValue(input.binNumber).trim() ||
+        getAutomaticInventoryDetailValue('sourcedBinNumber', 'receivingBinByLocation', requirement),
       inventoryStatus: getAutomaticInventoryDetailValue(
         'sourcedInventoryStatus',
         'receivingInventoryStatusByLocation',
@@ -2975,16 +3036,24 @@ define(
     };
   }
 
-  function getInventoryDetailAutomationErrors(requirement) {
+  function getInventoryDetailAutomationErrors(requirement, options) {
+    const input = options || {};
+    const receiptInventoryNumber = normalizeValue(input.receiptInventoryNumber).trim();
+    const binNumber = normalizeValue(input.binNumber).trim();
     const itemLabel = `LCM Item ${requirement.lcmItemId} (${requirement.itemText})`;
-    if (requirement.isSerial) {
-      return [`${itemLabel} is serialized. Create Item Receipt will not invent physical serial numbers.`];
+    if (requirement.isSerial && !receiptInventoryNumber && !input.allowManualInput) {
+      return [`${itemLabel} is serialized. Enter an actual Lot/Serial Number before confirming the receipt.`];
     }
     if (requirement.requiresExpirationDate) {
       return [`${itemLabel} requires an Expiration Date. Automatic Item Receipt cannot invent supplier expiry data.`];
     }
     const errors = [];
-    if (requirement.requiresBin && !getAutomaticInventoryDetailValue('sourcedBinNumber', 'receivingBinByLocation', requirement)) {
+    if (
+      requirement.requiresBin &&
+      !binNumber &&
+      !getAutomaticInventoryDetailValue('sourcedBinNumber', 'receivingBinByLocation', requirement) &&
+      !input.allowManualInput
+    ) {
       errors.push(`${itemLabel} requires a Bin Number, but NetSuite did not source one and no receiving bin is configured for ${inventoryDetailLocationText(requirement)}.`);
     }
     if (
@@ -2999,11 +3068,139 @@ define(
   function getAutomaticInventoryDetailValue(sourcedField, configuredType, requirement) {
     const sourcedValue = normalizeValue(requirement[sourcedField]).trim();
     if (sourcedValue) return sourcedValue;
+    if (configuredType === 'receivingBinByLocation') {
+      return getAutomaticReceivingBin(requirement);
+    }
     if (configuredType === 'receivingInventoryStatusByLocation') {
       const defaultStatus = getDefaultInventoryStatusId();
       if (defaultStatus) return defaultStatus;
     }
     return getConfiguredReceivingInventoryDetailValue(configuredType, requirement);
+  }
+
+  function getAutomaticReceivingBin(requirement) {
+    const configured = getConfiguredReceivingInventoryDetailValue('receivingBinByLocation', requirement);
+    if (configured) return configured;
+
+    const itemId = normalizeValue(requirement.itemId).trim();
+    const locationId = normalizeValue(requirement.locationId).trim();
+    const cacheKey = `${itemId}|${locationId}`;
+    if (Object.prototype.hasOwnProperty.call(receivingBinCache, cacheKey)) {
+      return receivingBinCache[cacheKey];
+    }
+
+    let binId = '';
+    try {
+      const itemLookup = search.lookupFields({ type: 'item', id: itemId, columns: ['preferredbin'] });
+      const preferredBin = itemLookup.preferredbin;
+      if (Array.isArray(preferredBin) && preferredBin.length) {
+        binId = normalizeValue(preferredBin[0].value || '').trim();
+      } else if (preferredBin && typeof preferredBin === 'object') {
+        binId = normalizeValue(preferredBin.value || '').trim();
+      } else {
+        binId = normalizeValue(preferredBin).trim();
+      }
+    } catch (error) {
+      log.audit({
+        title: 'LCM item preferred bin lookup skipped',
+        details: `Item ${itemId}: ${error.message || error}`,
+      });
+    }
+
+    if (!binId && locationId) {
+      try {
+        const bins = search
+          .create({
+            type: 'bin',
+            filters: [
+              ['location', 'anyof', locationId],
+              'AND',
+              ['inactive', 'is', 'F'],
+            ],
+            columns: [search.createColumn({ name: 'internalid', sort: search.Sort.ASC })],
+          })
+          .run()
+          .getRange({ start: 0, end: 1 });
+        if (bins && bins.length) {
+          binId = normalizeValue(bins[0].id || bins[0].getValue({ name: 'internalid' })).trim();
+        }
+      } catch (error) {
+        log.audit({
+          title: 'LCM receiving bin search skipped',
+          details: `Location ${locationId}: ${error.message || error}`,
+        });
+      }
+    }
+
+    receivingBinCache[cacheKey] = binId;
+    return binId;
+  }
+
+  function listReceivingBins(locationId) {
+    const key = normalizeValue(locationId).trim();
+    if (!key) return [];
+    if (Object.prototype.hasOwnProperty.call(receivingBinsCache, key)) return receivingBinsCache[key];
+
+    let bins = [];
+    try {
+      const results = search
+        .create({
+          type: 'bin',
+          filters: [
+            ['location', 'anyof', key],
+            'AND',
+            ['inactive', 'is', 'F'],
+          ],
+          columns: [search.createColumn({ name: 'binnumber', sort: search.Sort.ASC })],
+        })
+        .run()
+        .getRange({ start: 0, end: 1000 });
+      bins = (results || [])
+        .map((result) => ({
+          id: normalizeValue(result.id).trim(),
+          text: normalizeValue(result.getValue({ name: 'binnumber' }) || result.id).trim(),
+        }))
+        .filter((entry) => entry.id);
+    } catch (error) {
+      log.audit({
+        title: 'LCM receiving bin list skipped',
+        details: `Location ${key}: ${error.message || error}`,
+      });
+    }
+
+    receivingBinsCache[key] = bins;
+    return bins;
+  }
+
+  function listReceivingLocations() {
+    const key = 'active';
+    if (Object.prototype.hasOwnProperty.call(receivingLocationsCache, key)) return receivingLocationsCache[key];
+
+    let locations = [];
+    try {
+      const results = search
+        .create({
+          type: 'location',
+          filters: [['isinactive', 'is', 'F']],
+          columns: [search.createColumn({ name: 'name', sort: search.Sort.ASC })],
+        })
+        .run()
+        .getRange({ start: 0, end: 1000 });
+      locations = (results || [])
+        .map((result) => ({
+          id: normalizeValue(result.id).trim(),
+          text: normalizeValue(result.getValue({ name: 'name' }) || result.id).trim(),
+        }))
+        .filter((entry) => entry.id);
+    } catch (error) {
+      log.audit({
+        title: 'LCM receiving location list skipped',
+        details: error.message || error,
+      });
+    }
+
+    receivingLocationsCache[key] = locations;
+    return locations;
   }
 
   function getDefaultInventoryStatusId() {
@@ -3883,6 +4080,8 @@ define(
     getVendorBillDefaults,
     getVendorCurrencyDefaults,
     getVendorDefaults,
+    listReceivingBins,
+    listReceivingLocations,
     listCostCategoryItemMatches,
     listEligibleLcmsForItemReceipt,
     listEligibleLcmsForPurchaseOrder,
